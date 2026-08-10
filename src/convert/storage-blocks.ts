@@ -61,8 +61,34 @@ function elementsOf(node: Node): Element[] {
   return childrenOf(node).filter((child): child is Element => child.nodeType === Node.ELEMENT_NODE);
 }
 
-function isBlockElement(node: Node): boolean {
-  return node.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(tagOf(node as Element));
+/** A macro with a body is always a block; a bodyless one may be used inline. */
+function hasMacroBody(macro: Element): boolean {
+  return elementsOf(macro).some((child) =>
+    ['ac:rich-text-body', 'ac:plain-text-body'].includes(tagOf(child)),
+  );
+}
+
+/**
+ * Whether a node starts a new block.
+ *
+ * A bodyless macro such as `anchor` is frequently written inline, in the middle
+ * of a sentence. Treating every macro as a block would split the surrounding
+ * text into separate paragraphs that were never there — so a bodyless macro
+ * counts as a block only when nothing around it is inline content.
+ */
+function isBlockElement(node: Node, siblings: readonly Node[]): boolean {
+  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+  const tag = tagOf(node as Element);
+  if (!BLOCK_TAGS.has(tag)) return false;
+  if (tag !== 'ac:structured-macro' || hasMacroBody(node as Element)) return true;
+
+  return !siblings.some(
+    (sibling) =>
+      sibling !== node &&
+      !(sibling.nodeType === Node.TEXT_NODE && (sibling.nodeValue ?? '').trim().length === 0) &&
+      !(sibling.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(tagOf(sibling as Element))),
+  );
 }
 
 function convertList(element: Element, ctx: ConversionContext): List {
@@ -234,7 +260,7 @@ export function convertMixedContent(nodes: readonly Node[], ctx: ConversionConte
   };
 
   for (const node of nodes) {
-    if (isBlockElement(node)) {
+    if (isBlockElement(node, nodes)) {
       flush();
       output.push(...convertBlockElement(node as Element, ctx));
       continue;

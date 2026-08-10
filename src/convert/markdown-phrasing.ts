@@ -89,10 +89,15 @@ function linkToStorage(
  * spans. Dropped here so it never reaches Confluence. The check is scoped to
  * exactly that position, so a zero-width space a user genuinely typed survives.
  */
+const AMBIGUOUS_WHEN_ADJACENT = new Set(['inlineCode', 'strong', 'emphasis', 'delete']);
+
 function isCodeSeparator(nodes: readonly PhrasingContent[], index: number): boolean {
   const node = nodes[index];
   if (node?.type !== 'text' || node.value !== CODE_SEPARATOR) return false;
-  return nodes[index - 1]?.type === 'inlineCode' && nodes[index + 1]?.type === 'inlineCode';
+
+  const before = nodes[index - 1]?.type;
+  const after = nodes[index + 1]?.type;
+  return before !== undefined && before === after && AMBIGUOUS_WHEN_ADJACENT.has(before);
 }
 
 export function phrasingToStorage(nodes: readonly PhrasingContent[], ctx: ReverseContext): string {

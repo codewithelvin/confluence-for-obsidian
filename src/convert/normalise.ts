@@ -67,6 +67,25 @@ function unwrapSoleParagraphs(root: Element): void {
   }
 }
 
+/**
+ * Removes `<span>` wrappers carrying no attributes.
+ *
+ * Confluence's editor leaves bare `<span>` elements around fragments of text.
+ * They render identically to their contents and Confluence accepts either form,
+ * so treating them as content would make pages read-only over markup that means
+ * nothing.
+ */
+function unwrapBareSpans(root: Element): void {
+  for (const span of Array.from(root.querySelectorAll('span'))) {
+    if (span.attributes.length > 0) continue;
+    const parent = span.parentNode;
+    if (parent === null) continue;
+
+    while (span.firstChild !== null) parent.insertBefore(span.firstChild, span);
+    parent.removeChild(span);
+  }
+}
+
 /** Makes implicit same-space page references explicit, so both forms compare equal. */
 function applyDefaultSpaceKey(root: Element, spaceKey: string): void {
   for (const page of Array.from(root.getElementsByTagName('ri:page'))) {
@@ -89,6 +108,7 @@ export function normaliseStorage(xhtml: string, options: NormaliseOptions = {}):
     return xhtml.replace(/\s+/g, ' ').trim();
   }
 
+  unwrapBareSpans(parsed.value);
   unwrapSoleParagraphs(parsed.value);
 
   if (options.defaultSpaceKey !== undefined) {

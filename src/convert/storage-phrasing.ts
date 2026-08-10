@@ -84,11 +84,32 @@ function convertAcLink(element: Element, ctx: ConversionContext): PhrasingConten
   });
 }
 
+/**
+ * Inline formatting, unless the element cannot survive as Markdown emphasis.
+ *
+ * Three cases are preserved instead of converted:
+ *  - attributes, e.g. `<strong style="letter-spacing: 0.0px;">`, which Markdown
+ *    emphasis has nowhere to carry;
+ *  - empty elements, since `****` is not emphasis at all;
+ *  - whitespace-only content, since `** **` does not parse as emphasis either.
+ */
 function wrap(
   type: 'strong' | 'emphasis' | 'delete',
   element: Element,
   ctx: ConversionContext,
-): PhrasingContent {
+): PhrasingContent | PhrasingContent[] {
+  const text = textOf(element);
+
+  if (element.attributes.length > 0) {
+    return preserveWrapper(element, ctx, { type, label: `${tagOf(element)} with formatting` });
+  }
+  if (text.trim().length === 0) {
+    return makeInlinePlaceholder(ctx.placeholders, element, {
+      type,
+      label: `empty ${tagOf(element)}`,
+    });
+  }
+
   return { type, children: ctx.convertPhrasing(childrenOf(element)) };
 }
 
@@ -122,8 +143,15 @@ function convertAnchor(
   // tell them apart and turned every such anchor into an `ac:link`. Preserving
   // the anchor as a pair keeps the two distinguishable while its text stays
   // readable.
-  if (href.startsWith(`${ctx.baseUrl}/display/`)) {
-    return preserveWrapper(element, ctx, { type: 'link', label: 'link to a Confluence page' });
+  // A Markdown link carries only a destination and a title, so an anchor with
+  // styling — `<a href="..." style="color: rgb(0,0,0);">` is common — must be
+  // preserved. So must a link into Confluence, which would otherwise be
+  // indistinguishable from an `ac:link` when converting back.
+  const extraAttributes = Array.from(element.attributes).some(
+    (attribute) => attribute.name !== 'href' && attribute.name !== 'title',
+  );
+  if (extraAttributes || href.startsWith(`${ctx.baseUrl}/display/`)) {
+    return preserveWrapper(element, ctx, { type: 'link', label: 'link' });
   }
 
   return {
@@ -235,11 +263,22 @@ function firstElement(element: Element): Element | null {
  * Keeps adjacent code spans apart. Without this, two neighbouring placeholders
  * merge into one literal code span when the Markdown is read back.
  */
+/** Node types whose Markdown delimiters merge when two of them sit side by side. */
+const AMBIGUOUS_WHEN_ADJACENT = new Set(['inlineCode', 'strong', 'emphasis', 'delete']);
+
 function separateAdjacentCode(nodes: readonly PhrasingContent[]): PhrasingContent[] {
   const output: PhrasingContent[] = [];
 
   for (const node of nodes) {
-    if (output[output.length - 1]?.type === 'inlineCode' && node.type === 'inlineCode') {
+    const previous = output[output.length - 1];
+    // `` `a``b` `` collapses into one code span, and `**a****b**` into one
+    // strong. A zero-width separator keeps the delimiters apart; the reverse
+    // pass removes it, so nothing reaches Confluence.
+    if (
+      previous !== undefined &&
+      previous.type === node.type &&
+      AMBIGUOUS_WHEN_ADJACENT.has(node.type)
+    ) {
       output.push({ type: 'text', value: CODE_SEPARATOR });
     }
     output.push(node);
