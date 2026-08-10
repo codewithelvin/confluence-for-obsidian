@@ -4,7 +4,7 @@ import process from 'node:process';
 const isProduction = process.argv[2] === 'production';
 
 const banner = `/*
- * Confluence Data Center Connector
+ * Confluence 4 Obsidian
  * https://github.com/codewithelvin/confluence-for-obsidian
  * This is a generated bundle. Source lives in src/.
  */`;

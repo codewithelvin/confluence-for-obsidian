@@ -1,4 +1,4 @@
-# Confluence Data Center Connector
+# Confluence 4 Obsidian
 
 An Obsidian plugin that turns a Confluence **Data Center** space — or any subtree of it — into a live, editable working copy inside your vault.
 

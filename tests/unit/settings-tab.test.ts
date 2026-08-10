@@ -7,7 +7,7 @@ import { App as FakeApp, Plugin as FakePlugin, type PluginManifest } from '../fa
 
 const manifest: PluginManifest = {
   id: 'confluence-dc-connector',
-  name: 'Confluence Data Center Connector',
+  name: 'Confluence 4 Obsidian',
   version: '0.0.1',
   minAppVersion: '1.5.3',
   description: 'test',
