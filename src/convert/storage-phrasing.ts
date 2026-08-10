@@ -100,13 +100,20 @@ function wrap(
 ): PhrasingContent | PhrasingContent[] {
   const text = textOf(element);
 
-  if (element.attributes.length > 0) {
+  // A line break inside emphasis splits the Markdown delimiters across lines,
+  // where they no longer pair up.
+  const containsBreak = element.getElementsByTagName('br').length > 0;
+  if (element.attributes.length > 0 || containsBreak) {
     return preserveWrapper(element, ctx, { type, label: `${tagOf(element)} with formatting` });
   }
-  if (text.trim().length === 0) {
+
+  // Emphasis needs a word to attach to. `**` is not emphasis, `** **` is not
+  // either, and `*.*` fails the flanking rules, so anything without a letter or
+  // digit is preserved rather than converted.
+  if (!/[\p{L}\p{N}]/u.test(text)) {
     return makeInlinePlaceholder(ctx.placeholders, element, {
       type,
-      label: `empty ${tagOf(element)}`,
+      label: `${tagOf(element)} without word content`,
     });
   }
 

@@ -1,4 +1,4 @@
-import type { PhrasingContent } from 'mdast';
+import type { Link, PhrasingContent } from 'mdast';
 import { CODE_SEPARATOR, readInlinePlaceholderId } from './placeholder-registry';
 import { escapeAttribute, escapeText } from './storage-serialiser';
 import type { ReverseContext } from './types';
@@ -56,11 +56,28 @@ function pageTarget(url: string, ctx: ReverseContext): { space: string; title: s
   }
 }
 
-function linkToStorage(
-  url: string,
-  children: readonly PhrasingContent[],
-  ctx: ReverseContext,
-): string {
+/**
+ * Whether a link node came from a bare URL rather than link syntax.
+ *
+ * GFM turns any URL appearing in text into a link. Writing that back as an
+ * anchor would invent markup the page never had — and inside a preserved
+ * anchor whose text is a URL, it nests one anchor inside another. Markdown
+ * link syntax starts with `[` and an angle autolink with `<`; anything else at
+ * the node's offset was plain text.
+ */
+function isBareUrl(node: Link, source: string): boolean {
+  const offset = node.position?.start.offset;
+  if (offset === undefined) return false;
+
+  const first = source[offset];
+  return first !== '[' && first !== '<';
+}
+
+function linkToStorage(node: Link, ctx: ReverseContext): string {
+  if (isBareUrl(node, ctx.source)) return ctx.phrasing(node.children);
+
+  const url = node.url;
+  const children = node.children;
   const target = pageTarget(url, ctx);
   if (target === null) {
     return `<a href="${escapeAttribute(url)}">${ctx.phrasing(children)}</a>`;
@@ -125,7 +142,7 @@ export function phrasingToStorage(nodes: readonly PhrasingContent[], ctx: Revers
         break;
       }
       case 'link':
-        output += linkToStorage(node.url, node.children, ctx);
+        output += linkToStorage(node, ctx);
         break;
       case 'break':
         output += '<br/>';

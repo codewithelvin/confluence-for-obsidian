@@ -200,7 +200,12 @@ function convertHeading(
  * Preserving such a list keeps the rest of the page editable.
  */
 function convertListBlock(element: Element, ctx: ConversionContext): RootContent[] {
-  if (elementsOf(element).some((item) => item.attributes.length > 0)) {
+  // `<ul class="alternate">` carries a bullet style, and item styling marks
+  // nested wrappers. Neither survives a Markdown list.
+  if (
+    element.attributes.length > 0 ||
+    elementsOf(element).some((item) => item.attributes.length > 0)
+  ) {
     return [
       makeBlockPlaceholder(ctx.placeholders, element, {
         type: 'list',
