@@ -1,4 +1,4 @@
-import { parseStorage, riAttr } from './storage-parser';
+import { isDefaultColourSpan, parseStorage, riAttr } from './storage-parser';
 import { CANONICAL, serialiseChildren } from './storage-serialiser';
 
 /**
@@ -68,16 +68,17 @@ function unwrapSoleParagraphs(root: Element): void {
 }
 
 /**
- * Removes `<span>` wrappers carrying no attributes.
+ * Removes `<span>` wrappers that carry no formatting.
  *
- * Confluence's editor leaves bare `<span>` elements around fragments of text.
- * They render identically to their contents and Confluence accepts either form,
- * so treating them as content would make pages read-only over markup that means
- * nothing.
+ * Confluence's editor leaves bare `<span>` elements around fragments of text,
+ * and wraps ordinary prose in `<span style="color: rgb(0,0,0);">` — black text
+ * marked black. Both render identically to their contents and Confluence
+ * accepts either form, so treating them as content would make pages read-only
+ * over markup that means nothing.
  */
-function unwrapBareSpans(root: Element): void {
+function unwrapMeaninglessSpans(root: Element): void {
   for (const span of Array.from(root.querySelectorAll('span'))) {
-    if (span.attributes.length > 0) continue;
+    if (span.attributes.length > 0 && !isDefaultColourSpan(span)) continue;
     const parent = span.parentNode;
     if (parent === null) continue;
 
@@ -137,7 +138,7 @@ export function normaliseStorage(xhtml: string, options: NormaliseOptions = {}):
     return xhtml.replace(/\s+/g, ' ').trim();
   }
 
-  unwrapBareSpans(parsed.value);
+  unwrapMeaninglessSpans(parsed.value);
   unwrapSoleParagraphs(parsed.value);
   canonicaliseNestedEmphasis(parsed.value);
 

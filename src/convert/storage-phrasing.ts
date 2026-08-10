@@ -1,7 +1,7 @@
 import type { PhrasingContent } from 'mdast';
 import { makeInlineClose, makeInlineOpen, makeInlinePlaceholder } from './placeholder-factory';
 import { CODE_SEPARATOR, collapse, readInlinePlaceholderId } from './placeholder-registry';
-import { childrenOf, riAttr, tagOf } from './storage-parser';
+import { childrenOf, isDefaultColourSpan, riAttr, tagOf } from './storage-parser';
 import { FAITHFUL, serialiseElement } from './storage-serialiser';
 import type { ConversionContext } from './types';
 
@@ -187,16 +187,21 @@ function preserveWrapper(
 }
 
 /**
- * An unstyled span carries nothing and is unwrapped. A styled one is preserved
- * as a pair, because Confluence wraps ordinary prose in
- * `<span style="color: rgb(0,0,0);">` — preserving it whole would hide most of
- * the page behind opaque tokens, and dropping it would make the page read-only.
+ * A span that carries no formatting is unwrapped; one that does is preserved as
+ * a pair, so the prose between stays readable and editable.
+ *
+ * Two spans carry nothing: one with no attributes, and one whose only style is
+ * `color: rgb(0,0,0)` — black text marked black. Confluence's editor emits the
+ * second constantly, and preserving it turned real pages into a wall of
+ * placeholder tokens with the prose buried between them.
  */
 function convertSpan(
   element: Element,
   ctx: ConversionContext,
 ): PhrasingContent | PhrasingContent[] {
-  if (element.attributes.length === 0) return ctx.convertPhrasing(childrenOf(element));
+  if (element.attributes.length === 0 || isDefaultColourSpan(element)) {
+    return ctx.convertPhrasing(childrenOf(element));
+  }
 
   return preserveWrapper(element, ctx, { type: 'span', label: 'styled text' });
 }

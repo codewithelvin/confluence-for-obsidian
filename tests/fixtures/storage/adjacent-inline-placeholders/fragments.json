@@ -6,21 +6,5 @@
     "type": "image",
     "name": null,
     "label": "image: embedded"
-  },
-  {
-    "id": "cfb-0002",
-    "kind": "inline",
-    "xhtml": "<span style=\"color: rgb(0,0,0);\">",
-    "type": "span",
-    "name": null,
-    "label": "styled text"
-  },
-  {
-    "id": "cfb-0003",
-    "kind": "inline",
-    "xhtml": "</span>",
-    "type": "span",
-    "name": null,
-    "label": "end of styled text"
   }
 ]
