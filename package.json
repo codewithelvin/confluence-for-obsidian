@@ -1,0 +1,40 @@
+{
+  "name": "confluence-dc-connector",
+  "version": "0.0.1",
+  "description": "Mirror Confluence Data Center pages into an Obsidian vault as Markdown, edit locally, push back.",
+  "private": true,
+  "license": "MIT",
+  "author": "Elvin Huseynov",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codewithelvin/confluence-for-obsidian.git"
+  },
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "npm run typecheck && node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "install:test": "node scripts/install-test-vault.mjs",
+    "verify": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.18.0",
+    "jsdom": "^26.0.0",
+    "obsidian": "^1.8.7",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.21.0",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {}
+}

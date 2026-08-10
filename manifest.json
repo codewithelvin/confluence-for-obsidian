@@ -1,0 +1,10 @@
+{
+  "id": "confluence-dc-connector",
+  "name": "Confluence Data Center Connector",
+  "version": "0.0.1",
+  "minAppVersion": "1.5.3",
+  "description": "Mirror Confluence Data Center pages into your vault as Markdown, edit them locally, and push your changes back.",
+  "author": "Elvin Huseynov",
+  "authorUrl": "https://github.com/codewithelvin",
+  "isDesktopOnly": true
+}
