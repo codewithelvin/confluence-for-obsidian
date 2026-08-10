@@ -1,0 +1,15 @@
+# Normalise line endings to LF everywhere.
+#
+# Prettier is configured with endOfLine: "lf". Without this, Git for Windows
+# checks files out as CRLF and `npm run format:check` fails on a fresh clone
+# while passing in CI on Linux.
+* text=auto eol=lf
+
+# Binary assets must never be normalised.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
