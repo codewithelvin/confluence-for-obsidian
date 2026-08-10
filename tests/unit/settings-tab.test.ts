@@ -5,6 +5,11 @@ import { SettingsStore } from '../../src/settings/settings-store';
 import { CredentialStore } from '../../src/auth/credential-store';
 import type { ConfluenceClient } from '../../src/api/confluence-client';
 import { Logger } from '../../src/util/logger';
+import { FragmentStore } from '../../src/sync/fragment-store';
+import { SyncController } from '../../src/sync/sync-controller';
+import { SyncStateStore } from '../../src/sync/sync-state';
+import { SuspensionRegistry } from '../../src/sync/suspension';
+import { FakeStateGateway, FakeVaultGateway } from '../fakes/sync';
 import { App as FakeApp, Plugin as FakePlugin, type PluginManifest } from '../fakes/obsidian';
 
 const manifest: PluginManifest = {
@@ -21,11 +26,31 @@ function setup(): { store: SettingsStore; tab: ConfluenceSettingTab } {
   const plugin = new FakePlugin(new FakeApp(), manifest);
   const logger = new Logger('test', () => false);
   const store = new SettingsStore(plugin, logger);
+  const stateGateway = new FakeStateGateway();
+
+  const controller = new SyncController({
+    settings: store,
+    vault: new FakeVaultGateway(),
+    state: new SyncStateStore(stateGateway),
+    fragments: new FragmentStore(stateGateway),
+    suspensions: new SuspensionRegistry(),
+    logger,
+    newId: () => 'test-subscription-id',
+    createClient: () => {
+      throw new Error('no client should be created while rendering');
+    },
+    now: () => '2026-08-10T12:00:00Z',
+  });
+
   const tab = new ConfluenceSettingTab(plugin as unknown as Plugin, {
     store,
     credentials: new CredentialStore(null, store, logger),
+    controller,
     createClient: (): ConfluenceClient => {
       throw new Error('no client should be created while rendering');
+    },
+    startSync: () => {
+      throw new Error('no sync should start merely by rendering');
     },
     newId: () => 'test-connection-id',
   });
@@ -50,7 +75,7 @@ describe('ConfluenceSettingTab', () => {
     const { tab } = setup();
     tab.display();
     const headings = tab.containerEl.querySelectorAll('.setting-item-heading');
-    expect(headings).toHaveLength(4);
+    expect(headings).toHaveLength(5);
   });
 
   it('creates no Confluence client merely by rendering', () => {

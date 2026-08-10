@@ -15,10 +15,20 @@ export interface ConfirmOptions {
   readonly confirmText?: string;
   readonly destructive?: boolean;
   readonly requireTyped?: string;
+  /**
+   * Called when the modal closes without confirming, including via Escape or
+   * the close button.
+   *
+   * Needed wherever a caller is waiting on the answer: dismissing a prompt is
+   * a decision ("no"), and treating it as no answer at all leaves the caller
+   * waiting forever.
+   */
+  readonly onDismiss?: () => void;
 }
 
 export class ConfirmModal extends Modal {
   private typed = '';
+  private confirmed = false;
 
   constructor(
     app: App,
@@ -50,6 +60,7 @@ export class ConfirmModal extends Modal {
   override onClose(): void {
     this.typed = '';
     this.contentEl.empty();
+    if (!this.confirmed) this.options.onDismiss?.();
   }
 
   private renderActions(contentEl: HTMLElement, required: string | undefined): void {
@@ -57,6 +68,7 @@ export class ConfirmModal extends Modal {
       .addButton((button) => {
         button.setButtonText(this.options.confirmText ?? 'Confirm').onClick(() => {
           if (required !== undefined && this.typed.trim() !== required) return;
+          this.confirmed = true;
           this.onConfirm();
           this.close();
         });

@@ -17,6 +17,11 @@ export type ErrorCode =
   | 'FRAGMENT_MISSING'
   | 'OUT_OF_MOUNT'
   | 'PATH_TOO_LONG'
+  // Not in the §6.8 table, which lists the codes the *user* can act on. A vault
+  // write failing (permissions, a file locked by another tool, a full disk) is
+  // real and must be reported per page rather than collapsed into UNKNOWN, so
+  // the sync report can name the file that failed.
+  | 'VAULT_WRITE_FAILED'
   | 'RATE_LIMITED'
   | 'PERMISSION_DENIED'
   | 'NOT_FOUND'

@@ -141,12 +141,37 @@ export default tseslint.config(
     },
   },
 
-  // ---------------- every remaining layer: no HTTP outside the API gateway.
-  // `convert`, `api` and `vault` are deliberately absent — they declare their
-  // own `no-restricted-imports` above, and a second entry here would replace
-  // it rather than add to it.
+  // ------------------------------------ orchestration knows no UI, no host
+  // What makes the sync engine testable is that it can run with no Obsidian at
+  // all (spec §7.5): fake gateways, no vault, no network. An `obsidian` import
+  // here would quietly end that.
   {
-    files: ['src/{sync,ui,settings,commands,util,auth,diagnostics}/**/*.ts', 'src/main.ts'],
+    files: ['src/sync/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            NO_REQUEST_URL,
+            {
+              name: 'obsidian',
+              message:
+                'The sync engine must run against fake gateways with no host application ' +
+                '(spec §7.5). Vault access belongs in src/vault/.',
+            },
+          ],
+          patterns: [{ group: ['**/ui/**'], message: LAYER_MESSAGE }],
+        },
+      ],
+    },
+  },
+
+  // ---------------- every remaining layer: no HTTP outside the API gateway.
+  // `convert`, `api`, `vault` and `sync` are deliberately absent — they declare
+  // their own `no-restricted-imports` above, and a second entry here would
+  // replace it rather than add to it.
+  {
+    files: ['src/{ui,settings,commands,util,auth,diagnostics}/**/*.ts', 'src/main.ts'],
     rules: {
       'no-restricted-imports': ['error', { paths: [NO_REQUEST_URL] }],
     },

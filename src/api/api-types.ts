@@ -34,6 +34,14 @@ export interface PagedResult<T> {
   readonly start: number;
   readonly limit: number;
   readonly size: number;
+  /**
+   * Total matches across every page, when the endpoint reports it.
+   *
+   * CQL search returns it; the plain content endpoint does not. `null` means
+   * "unknown", never "zero" — the subscription size warning (FR-2.4) must not
+   * claim a space is empty because an endpoint stayed silent.
+   */
+  readonly totalSize: number | null;
   /** Relative path of the next page, or `null` at the end of the collection. */
   readonly nextPath: string | null;
 }
@@ -43,11 +51,21 @@ export interface ConfluencePageSummary {
   readonly title: string;
 }
 
-export interface ConfluencePage extends ConfluencePageSummary {
+/**
+ * A page's identity, position and version — everything sync needs to decide
+ * whether to fetch the body, without paying to transfer it.
+ */
+export interface ConfluencePageRef extends ConfluencePageSummary {
   readonly spaceKey: string;
   readonly version: number;
   /** Immediate parent, or `null` for a top-level page. */
   readonly parentId: string | null;
+  /** ISO-8601 timestamp of the last edit, or `''` when the server omitted it. */
+  readonly updatedAt: string;
+  readonly updatedBy: string;
+}
+
+export interface ConfluencePage extends ConfluencePageRef {
   /** The `body.storage` value — the format everything else is derived from. */
   readonly storage: string;
 }
@@ -98,6 +116,46 @@ export const parsePageSummary: Parser<ConfluencePageSummary> = (raw) => {
 };
 
 /**
+ * Reads identity, position and version.
+ *
+ * The immediate parent is the *last* ancestor: Confluence returns the chain
+ * root-first, so taking the first would reparent every page to the top of the
+ * space and flatten the whole hierarchy.
+ */
+function readRef(raw: Record<string, unknown>, id: string): ConfluencePageRef {
+  const ancestors = asArray(readPath(raw, 'ancestors')) ?? [];
+  const parent = ancestors.length === 0 ? undefined : ancestors[ancestors.length - 1];
+
+  return {
+    id,
+    title: asNonEmptyString(raw['title']) ?? '(untitled)',
+    spaceKey: asNonEmptyString(readPath(raw, 'space', 'key')) ?? '',
+    version: asFiniteNumber(readPath(raw, 'version', 'number')) ?? 1,
+    parentId: asNonEmptyString(readPath(parent, 'id')),
+    updatedAt: asNonEmptyString(readPath(raw, 'version', 'when')) ?? '',
+    updatedBy:
+      asNonEmptyString(readPath(raw, 'version', 'by', 'username')) ??
+      asNonEmptyString(readPath(raw, 'version', 'by', 'displayName')) ??
+      '',
+  };
+}
+
+/**
+ * Validates a page reference — everything except the body.
+ *
+ * This is what subtree enumeration returns. Fetching 500 bodies to discover
+ * that three changed would blow the §7.1 sync budget on its own.
+ */
+export const parsePageRef: Parser<ConfluencePageRef> = (raw) => {
+  if (!isRecord(raw)) return err(malformed('a page'));
+
+  const id = asNonEmptyString(raw['id']);
+  if (id === null) return err(malformed('a page'));
+
+  return ok(readRef(raw, id));
+};
+
+/**
  * Validates a full page. The storage body is required: a page fetched without
  * `expand=body.storage` would otherwise convert to an empty note, which on a
  * later push would blank the page in Confluence.
@@ -109,17 +167,7 @@ export const parsePage: Parser<ConfluencePage> = (raw) => {
   const storage = asString(readPath(raw, 'body', 'storage', 'value'));
   if (id === null || storage === null) return err(malformed('a page body'));
 
-  const ancestors = asArray(readPath(raw, 'ancestors')) ?? [];
-  const parent = ancestors.length === 0 ? undefined : ancestors[ancestors.length - 1];
-
-  return ok({
-    id,
-    title: asNonEmptyString(raw['title']) ?? '(untitled)',
-    spaceKey: asNonEmptyString(readPath(raw, 'space', 'key')) ?? '',
-    version: asFiniteNumber(readPath(raw, 'version', 'number')) ?? 1,
-    parentId: asNonEmptyString(readPath(parent, 'id')),
-    storage,
-  });
+  return ok({ ...readRef(raw, id), storage });
 };
 
 /**
@@ -149,6 +197,7 @@ export function parsePaged<T>(
     start: asFiniteNumber(raw['start']) ?? 0,
     limit: asFiniteNumber(raw['limit']) ?? results.length,
     size: asFiniteNumber(raw['size']) ?? results.length,
+    totalSize: asFiniteNumber(raw['totalSize']),
     nextPath: next,
   });
 }

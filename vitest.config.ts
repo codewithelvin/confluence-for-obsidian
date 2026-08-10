@@ -49,6 +49,11 @@ export default defineConfig({
         // lowered; see the M2 journal entry.
         'src/convert/**': { lines: 95, functions: 95, branches: 88, statements: 95 },
         'src/api/**': { lines: 90, functions: 85, branches: 88, statements: 90 },
+        // Spec §8.1 gate for the sync engine, in force from M3.
+        'src/sync/**': { lines: 90, functions: 90, branches: 85, statements: 90 },
+        // The vault gateway is the only code in the plugin that can lose one of
+        // the user's own files, so it is held to the same bar as auth.
+        'src/vault/**': { lines: 90, functions: 90, branches: 85, statements: 90 },
         // Security-critical: this is the code holding the promise that a token
         // never reaches disk in plain text.
         'src/auth/**': { lines: 95, functions: 90, branches: 85, statements: 95 },

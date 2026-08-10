@@ -35,3 +35,91 @@
 .confluence-connection-status.is-success {
   color: var(--text-success);
 }
+
+/* --- Sync panel (M3) ------------------------------------------------------ */
+
+.confluence-sync-panel {
+  padding: var(--size-4-3);
+  overflow-y: auto;
+}
+
+.confluence-panel-section {
+  margin-bottom: var(--size-4-4);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.confluence-panel-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: var(--size-4-4);
+}
+
+.confluence-panel-summary {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: var(--size-4-2);
+}
+
+.confluence-panel-warning {
+  color: var(--text-warning);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: var(--size-4-2);
+}
+
+.confluence-panel-error {
+  color: var(--text-error);
+  background-color: var(--background-modifier-error);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-2);
+  margin-bottom: var(--size-4-3);
+}
+
+.confluence-panel-group {
+  margin-bottom: var(--size-4-2);
+}
+
+.confluence-panel-group-title {
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+.confluence-panel-list {
+  margin: var(--size-2-1) 0 0 0;
+  padding-left: var(--size-4-4);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  word-break: break-word;
+}
+
+/* --- Preserved content placeholders (M3, FR-4.5) -------------------------- */
+
+.confluence-placeholder {
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+  padding: var(--size-4-3);
+  margin: var(--size-4-2) 0;
+}
+
+.confluence-placeholder-title {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+.confluence-placeholder-label {
+  color: var(--text-muted);
+  margin-top: var(--size-2-1);
+  word-break: break-word;
+}
+
+.confluence-placeholder-note {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  margin-top: var(--size-2-2);
+}
+
+.confluence-placeholder-open {
+  margin-top: var(--size-4-2);
+}

@@ -54,9 +54,72 @@ function augmentDom(): void {
 
 augmentDom();
 
-export class App {}
+import { FileManager, MetadataCache, TFile, Vault } from './obsidian-vault';
+
+export {
+  FileManager,
+  MetadataCache,
+  Vault,
+  FileSystemAdapter,
+  TAbstractFile,
+  TFile,
+  TFolder,
+  parseFrontmatter,
+  serialiseFrontmatter,
+} from './obsidian-vault';
+
+export class Workspace {
+  activeFile: TFile | null = null;
+  readonly revealed: unknown[] = [];
+
+  getActiveFile(): TFile | null {
+    return this.activeFile;
+  }
+
+  getLeavesOfType(): WorkspaceLeaf[] {
+    return [];
+  }
+
+  getRightLeaf(): WorkspaceLeaf | null {
+    return new WorkspaceLeaf();
+  }
+
+  revealLeaf(leaf: unknown): Promise<void> {
+    this.revealed.push(leaf);
+    return Promise.resolve();
+  }
+}
+
+export class WorkspaceLeaf {
+  viewState: unknown = null;
+
+  setViewState(state: unknown): Promise<void> {
+    this.viewState = state;
+    return Promise.resolve();
+  }
+}
+
+export class App {
+  readonly vault = new Vault();
+  readonly fileManager = new FileManager(this.vault);
+  readonly metadataCache = new MetadataCache(this.vault);
+  readonly workspace = new Workspace();
+}
+
+/** Minimal stand-in for Obsidian's sidebar view base class. */
+export class ItemView {
+  readonly containerEl: HTMLElement;
+  readonly contentEl: HTMLElement;
+
+  constructor(readonly leaf: WorkspaceLeaf) {
+    this.containerEl = document.createElement('div');
+    this.contentEl = this.containerEl.appendChild(document.createElement('div'));
+  }
+}
 
 export interface PluginManifest {
+  /** Vault path of the plugin folder; where plugin state is written. */
+  dir?: string;
   id: string;
   name: string;
   version: string;
@@ -95,9 +158,27 @@ export class Plugin {
 
   readonly commands: { id: string; name: string; callback?: () => unknown }[] = [];
 
+  readonly views = new Map<string, unknown>();
+  readonly codeBlockProcessors = new Map<string, unknown>();
+  readonly statusBarItems: HTMLElement[] = [];
+
   registerEvent(): void {}
   registerInterval(): void {}
   registerDomEvent(): void {}
+
+  registerView(type: string, factory: unknown): void {
+    this.views.set(type, factory);
+  }
+
+  registerMarkdownCodeBlockProcessor(language: string, handler: unknown): void {
+    this.codeBlockProcessors.set(language, handler);
+  }
+
+  addStatusBarItem(): HTMLElement {
+    const element = document.createElement('div');
+    this.statusBarItems.push(element);
+    return element;
+  }
 
   addCommand(command: { id: string; name: string; callback?: () => unknown }): void {
     this.commands.push(command);
@@ -138,6 +219,37 @@ export class ToggleComponent {
 
   onChange(callback: (value: boolean) => void): this {
     this.inputEl.addEventListener('change', () => callback(this.inputEl.checked));
+    return this;
+  }
+}
+
+export class DropdownComponent {
+  readonly selectEl: HTMLSelectElement;
+
+  constructor(containerEl: HTMLElement) {
+    this.selectEl = document.createElement('select');
+    containerEl.appendChild(this.selectEl);
+  }
+
+  addOption(value: string, display: string): this {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = display;
+    this.selectEl.appendChild(option);
+    return this;
+  }
+
+  setValue(value: string): this {
+    this.selectEl.value = value;
+    return this;
+  }
+
+  getValue(): string {
+    return this.selectEl.value;
+  }
+
+  onChange(callback: (value: string) => void): this {
+    this.selectEl.addEventListener('change', () => callback(this.selectEl.value));
     return this;
   }
 }
@@ -202,6 +314,11 @@ export class Setting {
 
   addToggle(build: (toggle: ToggleComponent) => unknown): this {
     build(new ToggleComponent(this.controlEl));
+    return this;
+  }
+
+  addDropdown(build: (dropdown: DropdownComponent) => unknown): this {
+    build(new DropdownComponent(this.controlEl));
     return this;
   }
 

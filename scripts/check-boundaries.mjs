@@ -44,6 +44,18 @@ const PROBES = [
     rule: 'no-restricted-imports',
   },
   {
+    label: 'the sync engine must not depend on the host application',
+    path: 'src/sync/__boundary_probe_host.ts',
+    code: "import { Notice } from 'obsidian';\nexport const probe = Notice;\n",
+    rule: 'no-restricted-imports',
+  },
+  {
+    label: 'the sync engine must not import the UI layer',
+    path: 'src/sync/__boundary_probe_ui.ts',
+    code: "import { ConfirmModal } from '../ui/confirm-modal';\nexport const probe = ConfirmModal;\n",
+    rule: 'no-restricted-imports',
+  },
+  {
     label: 'innerHTML is banned everywhere (XSS boundary)',
     path: 'src/ui/__boundary_probe.ts',
     code: 'export function probe(el: HTMLElement): void {\n  el.innerHTML = "<b>x</b>";\n}\n',

@@ -1,30 +1,53 @@
 import { PluginSettingTab, Setting } from 'obsidian';
 import type { Plugin } from 'obsidian';
 import { ConnectionsSection, type ConnectionsSectionDeps } from '../ui/connections-section';
+import { SubscriptionsSection } from '../ui/subscriptions-section';
+import type { SyncController } from '../sync/sync-controller';
+import { AppError } from '../util/errors';
+import { err } from '../util/result';
 import type { SettingsStore } from './settings-store';
+import type { Subscription } from './settings-types';
 
 /** Everything the tab needs; `app` and `refresh` are supplied by the tab itself. */
-export type SettingsTabDeps = Omit<ConnectionsSectionDeps, 'app' | 'refresh'>;
+export interface SettingsTabDeps extends Omit<ConnectionsSectionDeps, 'app' | 'refresh'> {
+  readonly controller: SyncController;
+  readonly startSync: (subscription: Subscription) => void;
+}
 
 /**
  * Settings UI. Presentation only — it reads and writes the store and holds no
  * business logic (spec §7.5).
- *
- * Subscription management lands in M3.
  */
 export class ConfluenceSettingTab extends PluginSettingTab {
   private readonly store: SettingsStore;
   private readonly connections: ConnectionsSection;
+  private readonly subscriptions: SubscriptionsSection;
 
   constructor(plugin: Plugin, deps: SettingsTabDeps) {
     super(plugin.app, plugin);
     this.store = deps.store;
-    this.connections = new ConnectionsSection({
-      ...deps,
+
+    const refresh = (): void => {
+      this.display();
+    };
+    this.connections = new ConnectionsSection({ ...deps, app: plugin.app, refresh });
+    this.subscriptions = new SubscriptionsSection({
       app: plugin.app,
-      refresh: () => {
-        this.display();
+      store: deps.store,
+      controller: deps.controller,
+      listSpaces: (connectionId) => {
+        const connection = deps.store
+          .get()
+          .connections.find((candidate) => candidate.id === connectionId);
+        if (connection === undefined) {
+          return Promise.resolve(
+            err(new AppError('NOT_FOUND', 'That connection no longer exists.')),
+          );
+        }
+        return deps.createClient(connection).listSpaces();
       },
+      startSync: deps.startSync,
+      refresh,
     });
   }
 
@@ -33,6 +56,7 @@ export class ConfluenceSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     this.connections.render(containerEl);
+    this.subscriptions.render(containerEl);
     this.renderAttachmentSettings(containerEl);
     this.renderSafetySettings(containerEl);
     this.renderAdvancedSettings(containerEl);
