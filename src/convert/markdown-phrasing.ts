@@ -1,5 +1,5 @@
 import type { PhrasingContent } from 'mdast';
-import { readInlinePlaceholderId } from './placeholder-registry';
+import { CODE_SEPARATOR, readInlinePlaceholderId } from './placeholder-registry';
 import { escapeAttribute, escapeText } from './storage-serialiser';
 import type { ReverseContext } from './types';
 
@@ -84,10 +84,23 @@ function linkToStorage(
   return `<ac:link>${resource}<ac:link-body>${ctx.phrasing(children)}</ac:link-body></ac:link>`;
 }
 
+/**
+ * True for the separator the forward pass inserts between two adjacent code
+ * spans. Dropped here so it never reaches Confluence. The check is scoped to
+ * exactly that position, so a zero-width space a user genuinely typed survives.
+ */
+function isCodeSeparator(nodes: readonly PhrasingContent[], index: number): boolean {
+  const node = nodes[index];
+  if (node?.type !== 'text' || node.value !== CODE_SEPARATOR) return false;
+  return nodes[index - 1]?.type === 'inlineCode' && nodes[index + 1]?.type === 'inlineCode';
+}
+
 export function phrasingToStorage(nodes: readonly PhrasingContent[], ctx: ReverseContext): string {
   let output = '';
 
-  for (const node of nodes) {
+  for (const [index, node] of nodes.entries()) {
+    if (isCodeSeparator(nodes, index)) continue;
+
     switch (node.type) {
       case 'text':
         output += escapeText(node.value);

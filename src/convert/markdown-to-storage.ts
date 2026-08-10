@@ -5,6 +5,7 @@ import { AppError } from '../util/errors';
 import { err, ok, type Result } from '../util/result';
 import { blocksToStorage } from './markdown-blocks';
 import { phrasingToStorage } from './markdown-phrasing';
+import { parseStorage } from './storage-parser';
 import type { ConversionOptions, FragmentMap, ReverseContext } from './types';
 
 /**
@@ -59,6 +60,20 @@ export function markdownToStorage(
         'VERIFICATION_FAILED',
         `This note contains ${list(context.unsupported)}, which cannot be written to ` +
           'Confluence. Remove it, or edit the page in Confluence instead.',
+        { action: 'show-diff' },
+      ),
+    );
+  }
+
+  // Last line of defence. Preserved wrappers are written as a placeholder pair,
+  // so deleting one half would leave unbalanced markup. Re-parsing catches that
+  // — and any other way the output could be malformed — before it is ever sent.
+  if (!parseStorage(storage).ok) {
+    return err(
+      new AppError(
+        'VERIFICATION_FAILED',
+        'Converting this note produced markup Confluence would reject, usually because a ' +
+          'preserved block was only partly deleted. Undo the change, or pull the page again.',
         { action: 'show-diff' },
       ),
     );

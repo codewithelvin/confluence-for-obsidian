@@ -14,6 +14,18 @@ import type { Fragment, FragmentKind, FragmentMap } from './types';
 
 export const BLOCK_FENCE_LANGUAGE = 'confluence-block';
 
+/**
+ * Separator inserted between two adjacent code spans.
+ *
+ * Markdown cannot express them adjacently: `` `a``b` `` re-parses as a single
+ * span containing ``a``b``, which silently merges two placeholders into one
+ * piece of literal text. Confluence pages hit this constantly — an inline image
+ * immediately followed by a styled span is two placeholders side by side.
+ *
+ * The separator is removed again on the way back, so nothing reaches Confluence.
+ */
+export const CODE_SEPARATOR = '​';
+
 const ID_PREFIX = 'cfb-';
 const ID_DIGITS = 4;
 

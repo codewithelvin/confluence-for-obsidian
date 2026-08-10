@@ -85,14 +85,14 @@ describe('probeSpaceFidelity', () => {
         jsonResponse({
           results: [
             { id: '1', title: 'Clean' },
-            { id: '2', title: 'Commented' },
+            { id: '2', title: 'Wrapped table' },
           ],
         }),
         jsonResponse(page('1', '<h1>Title</h1><p>Body.</p>')),
         jsonResponse(
           page(
             '2',
-            '<p>A <ac:inline-comment-marker ac:ref="r">note</ac:inline-comment-marker>.</p>',
+            '<table><tbody><tr><th><p>Name</p></th></tr><tr><td><p>a</p></td></tr></tbody></table>',
           ),
         ),
       ]),
@@ -105,22 +105,20 @@ describe('probeSpaceFidelity', () => {
     expect(probe.value.sampled).toBe(2);
     expect(probe.value.certified).toBe(1);
     expect(probe.value.degraded).toBe(1);
-    expect(probe.value.observations.withInlineComments).toBe(1);
+    expect(probe.value.observations.tableCellsWithParagraphs).toBe(1);
   });
 
   it('keeps the storage of a failing page so the cause can be inspected', async () => {
     const probe = await probeSpaceFidelity(
       client([
-        jsonResponse({ results: [{ id: '1', title: 'Commented' }] }),
-        jsonResponse(
-          page('1', '<p><ac:inline-comment-marker ac:ref="r">x</ac:inline-comment-marker></p>'),
-        ),
+        jsonResponse({ results: [{ id: '1', title: 'Wrapped table' }] }),
+        jsonResponse(page('1', '<table><tbody><tr><th><p>Name</p></th></tr></tbody></table>')),
       ]),
       'TT',
       { baseUrl: BASE_URL, limit: 50 },
     );
 
-    expect(probe.ok && probe.value.pages[0]?.storage).toContain('inline-comment-marker');
+    expect(probe.ok && probe.value.pages[0]?.storage).toContain('<th><p>Name</p></th>');
   });
 
   it('discards the storage of a page that converts cleanly', async () => {

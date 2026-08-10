@@ -1,6 +1,6 @@
 import type { PhrasingContent } from 'mdast';
-import { makeInlinePlaceholder } from './placeholder-factory';
-import { collapse, readInlinePlaceholderId } from './placeholder-registry';
+import { makeInlineClose, makeInlineOpen, makeInlinePlaceholder } from './placeholder-factory';
+import { CODE_SEPARATOR, collapse, readInlinePlaceholderId } from './placeholder-registry';
 import { childrenOf, riAttr, tagOf } from './storage-parser';
 import type { ConversionContext } from './types';
 
@@ -10,6 +10,12 @@ import type { ConversionContext } from './types';
  * Anything not handled here becomes an inline placeholder. The mapping table is
  * a whitelist: unknown input is preserved, never guessed at.
  */
+
+/**
+ * Inline elements that wrap readable prose. These are preserved as a pair so
+ * their contents stay visible and editable; everything else is preserved whole.
+ */
+const WRAPPER_TAGS = new Set(['u', 'ins', 'sub', 'sup', 'font', 'small', 'mark']);
 
 /**
  * Absolute URL of a Confluence page.
@@ -119,8 +125,27 @@ function convertAnchor(
 }
 
 /**
- * An unstyled span carries nothing and is unwrapped. A styled one must be
- * preserved, or its formatting would be silently dropped on push.
+ * Preserves a wrapper element around content that stays readable.
+ *
+ * `open` is registered before the children and `close` after, so ids follow
+ * document order and repeated conversion of unchanged content is identical.
+ */
+function preserveWrapper(
+  element: Element,
+  ctx: ConversionContext,
+  detail: { type: string; label: string },
+): PhrasingContent[] {
+  const open = makeInlineOpen(ctx.placeholders, element, detail);
+  const children = ctx.convertPhrasing(childrenOf(element));
+  const close = makeInlineClose(ctx.placeholders, element, detail);
+  return [open, ...children, close];
+}
+
+/**
+ * An unstyled span carries nothing and is unwrapped. A styled one is preserved
+ * as a pair, because Confluence wraps ordinary prose in
+ * `<span style="color: rgb(0,0,0);">` — preserving it whole would hide most of
+ * the page behind opaque tokens, and dropping it would make the page read-only.
  */
 function convertSpan(
   element: Element,
@@ -128,10 +153,7 @@ function convertSpan(
 ): PhrasingContent | PhrasingContent[] {
   if (element.attributes.length === 0) return ctx.convertPhrasing(childrenOf(element));
 
-  return makeInlinePlaceholder(ctx.placeholders, element, {
-    type: 'span',
-    label: `styled text: ${collapse(textOf(element), 40)}`,
-  });
+  return preserveWrapper(element, ctx, { type: 'span', label: 'styled text' });
 }
 
 export function convertPhrasingElement(
@@ -160,10 +182,7 @@ export function convertPhrasingElement(
     case 'span':
       return convertSpan(element, ctx);
     case 'ac:inline-comment-marker':
-      // Unwrapped so the text stays readable. The marker itself cannot be
-      // reproduced, so certification will mark such a page read-only — the
-      // deliberate trade of readability over editability.
-      return ctx.convertPhrasing(childrenOf(element));
+      return preserveWrapper(element, ctx, { type: 'comment', label: 'inline comment' });
     case 'ac:link':
       return convertAcLink(element, ctx);
     case 'ac:image':
@@ -178,11 +197,16 @@ export function convertPhrasingElement(
         label: `date: ${element.getAttribute('datetime') ?? ''}`,
       });
     default:
-      return makeInlinePlaceholder(ctx.placeholders, element, {
-        type: 'unsupported',
-        name: tag,
-        label: `${tag}: ${collapse(textOf(element), 40)}`,
-      });
+      // A wrapper preserved whole would hide the prose inside it, so wrappers
+      // are preserved as a pair instead. Everything else — self-contained
+      // constructs whose inner markup is not readable text — is preserved whole.
+      return WRAPPER_TAGS.has(tag)
+        ? preserveWrapper(element, ctx, { type: 'wrapper', label: tag })
+        : makeInlinePlaceholder(ctx.placeholders, element, {
+            type: 'unsupported',
+            name: tag,
+            label: `${tag}: ${collapse(textOf(element), 40)}`,
+          });
   }
 }
 
@@ -191,6 +215,33 @@ function firstElement(element: Element): Element | null {
     if (child.nodeType === Node.ELEMENT_NODE) return child as Element;
   }
   return null;
+}
+
+/**
+ * Keeps adjacent code spans apart. Without this, two neighbouring placeholders
+ * merge into one literal code span when the Markdown is read back.
+ */
+function separateAdjacentCode(nodes: readonly PhrasingContent[]): PhrasingContent[] {
+  const output: PhrasingContent[] = [];
+
+  for (const node of nodes) {
+    if (output[output.length - 1]?.type === 'inlineCode' && node.type === 'inlineCode') {
+      output.push({ type: 'text', value: CODE_SEPARATOR });
+    }
+    output.push(node);
+  }
+
+  return output;
+}
+
+/**
+ * A trailing break cannot be written as a Markdown hard break and read back: a
+ * backslash at the end of a block is just a backslash. Raw `<br/>` round-trips
+ * exactly and renders identically.
+ */
+function htmlTrailingBreak(nodes: readonly PhrasingContent[]): PhrasingContent[] {
+  if (nodes[nodes.length - 1]?.type !== 'break') return [...nodes];
+  return [...nodes.slice(0, -1), { type: 'html', value: '<br/>' }];
 }
 
 export function convertPhrasingNodes(
@@ -212,5 +263,5 @@ export function convertPhrasingNodes(
     else output.push(converted);
   }
 
-  return output;
+  return separateAdjacentCode(htmlTrailingBreak(output));
 }

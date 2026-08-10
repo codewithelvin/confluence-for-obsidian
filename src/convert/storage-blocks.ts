@@ -2,6 +2,7 @@ import type { BlockContent, Heading, List, ListItem, RootContent } from 'mdast';
 import { convertMacro } from './macro-handlers';
 import { makeBlockPlaceholder } from './placeholder-factory';
 import { childrenOf, tagOf } from './storage-parser';
+import { FAITHFUL, serialiseElement } from './storage-serialiser';
 import type { ConversionContext } from './types';
 import { convertTable } from './storage-tables';
 
@@ -119,6 +120,33 @@ function convertTaskList(element: Element, ctx: ConversionContext): List {
   return { type: 'list', ordered: false, start: null, spread: false, children: items };
 }
 
+/**
+ * A paragraph holding nothing but line breaks. Confluence writes
+ * `<p><br /></p>` for vertical space, and real pages are full of them.
+ */
+function isSpacerParagraph(element: Element): boolean {
+  for (const child of childrenOf(element)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      if ((child.nodeValue ?? '').trim().length > 0) return false;
+      continue;
+    }
+    if (child.nodeType === Node.ELEMENT_NODE && tagOf(child as Element) !== 'br') return false;
+  }
+  return true;
+}
+
+/**
+ * Markdown has no empty paragraph that survives a parse — a lone hard break
+ * degrades to a stray backslash — so a spacer paragraph is emitted as raw HTML,
+ * which round-trips exactly and still renders as blank space.
+ */
+function convertParagraph(element: Element, ctx: ConversionContext): RootContent[] {
+  if (isSpacerParagraph(element)) {
+    return [{ type: 'html', value: serialiseElement(element, FAITHFUL) }];
+  }
+  return [{ type: 'paragraph', children: ctx.convertPhrasing(childrenOf(element)) }];
+}
+
 function convertBlockElement(element: Element, ctx: ConversionContext): RootContent[] {
   const tag = tagOf(element);
   const depth = HEADINGS[tag];
@@ -129,7 +157,7 @@ function convertBlockElement(element: Element, ctx: ConversionContext): RootCont
 
   switch (tag) {
     case 'p':
-      return [{ type: 'paragraph', children: ctx.convertPhrasing(childrenOf(element)) }];
+      return convertParagraph(element, ctx);
     case 'ul':
     case 'ol':
       return [convertList(element, ctx)];

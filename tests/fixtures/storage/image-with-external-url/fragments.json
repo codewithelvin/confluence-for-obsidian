@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<ac:image ac:width=\"16\"><ri:url ri:value=\"https://jira.example.com/secure/viewavatar?size=xsmall&amp;avatarId=13807\"/></ac:image>",
+    "type": "image",
+    "name": null,
+    "label": "image: embedded"
+  }
+]

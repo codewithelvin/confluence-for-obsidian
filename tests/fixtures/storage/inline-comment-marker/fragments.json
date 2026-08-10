@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<ac:inline-comment-marker ac:ref=\"abc-123\">",
+    "type": "comment",
+    "name": null,
+    "label": "inline comment"
+  },
+  {
+    "id": "cfb-0002",
+    "kind": "inline",
+    "xhtml": "</ac:inline-comment-marker>",
+    "type": "comment",
+    "name": null,
+    "label": "end of inline comment"
+  }
+]

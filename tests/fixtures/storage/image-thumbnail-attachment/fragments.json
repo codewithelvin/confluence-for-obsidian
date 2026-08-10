@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<ac:image ac:thumbnail=\"true\" ac:width=\"16\"><ri:attachment ri:filename=\"suggestion.png\"/></ac:image>",
+    "type": "image",
+    "name": null,
+    "label": "image: suggestion.png"
+  }
+]

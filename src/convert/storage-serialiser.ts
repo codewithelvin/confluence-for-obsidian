@@ -113,6 +113,22 @@ export function serialiseElement(
     : `<${tag}${attributes}>${children}</${tag}>`;
 }
 
+/**
+ * The opening tag alone, for wrappers preserved as a placeholder pair.
+ *
+ * Preserving a wrapper whole would hide everything inside it. Confluence's
+ * editor wraps ordinary prose in `<span style="color: rgb(0,0,0);">` — black
+ * text marked black — so whole-element preservation would replace most of a
+ * page with opaque tokens.
+ */
+export function serialiseStartTag(element: Element, options: SerialiseOptions): string {
+  return `<${element.nodeName.toLowerCase()}${serialiseAttributes(element, options)}>`;
+}
+
+export function serialiseEndTag(element: Element): string {
+  return `</${element.nodeName.toLowerCase()}>`;
+}
+
 export function serialiseChildren(node: Node, options: SerialiseOptions, preserve = false): string {
   return Array.from(node.childNodes)
     .map((child) => serialiseNode(child, options, preserve))

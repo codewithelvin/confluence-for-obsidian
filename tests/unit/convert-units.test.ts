@@ -331,13 +331,26 @@ describe('certify', () => {
   });
 
   it('returns the Markdown and fragments even when certification fails', () => {
+    // Cells wrapped in <p> are unwrapped so the table stays a real table; the
+    // reverse pass writes bare cells, so this form cannot be reproduced.
     const degraded =
-      '<p>A <ac:inline-comment-marker ac:ref="1">note</ac:inline-comment-marker>.</p>';
+      '<table><tbody><tr><th><p>Name</p></th></tr><tr><td><p>a</p></td></tr></tbody></table>';
     const result = certify(degraded, OPTIONS);
 
     expect(result.ok && result.value.certified).toBe(false);
-    expect(result.ok && result.value.markdown).toContain('note');
+    expect(result.ok && result.value.markdown).toContain('Name');
     expect(result.ok && result.value.detail).not.toBeNull();
+  });
+
+  it('certifies an inline comment marker, which is preserved as a pair', () => {
+    const result = certify(
+      '<p>A <ac:inline-comment-marker ac:ref="1">note</ac:inline-comment-marker>.</p>',
+      OPTIONS,
+    );
+
+    expect(result.ok && result.value.certified).toBe(true);
+    // The commented text stays readable rather than hidden behind a token.
+    expect(result.ok && result.value.markdown).toContain('note');
   });
 
   it('propagates a parse failure instead of reporting a fidelity result', () => {

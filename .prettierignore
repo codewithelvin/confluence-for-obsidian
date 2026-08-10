@@ -3,3 +3,10 @@ coverage/
 node_modules/
 dist/
 package-lock.json
+
+# Golden corpus fixtures are inputs and generated output, not source.
+#
+# `expected.md` is compared to converter output byte for byte, so a formatter
+# rewriting it would silently redefine what the corpus asserts. `input.xml` is
+# storage format captured from Confluence and must stay exactly as received.
+tests/fixtures/

@@ -6,7 +6,12 @@ import {
   inlinePlaceholderValue,
   type PlaceholderRegistry,
 } from './placeholder-registry';
-import { FAITHFUL, serialiseElement } from './storage-serialiser';
+import {
+  FAITHFUL,
+  serialiseElement,
+  serialiseEndTag,
+  serialiseStartTag,
+} from './storage-serialiser';
 
 /**
  * Turns an unsupported construct into a placeholder, capturing its source
@@ -38,6 +43,43 @@ export function makeBlockPlaceholder(
     meta: null,
     value: blockPlaceholderBody(fragment),
   };
+}
+
+/**
+ * Preserves a wrapper element as a pair of placeholders, so its contents stay
+ * readable and editable while the wrapper itself round-trips exactly.
+ *
+ * Call `open` before converting the children and `close` after, so the ids stay
+ * in document order and conversion remains repeatable.
+ */
+export function makeInlineOpen(
+  registry: PlaceholderRegistry,
+  element: Element,
+  detail: PlaceholderDetail,
+): InlineCode {
+  const fragment = registry.add({
+    kind: 'inline',
+    xhtml: serialiseStartTag(element, FAITHFUL),
+    type: detail.type,
+    name: detail.name ?? null,
+    label: collapse(detail.label),
+  });
+  return { type: 'inlineCode', value: inlinePlaceholderValue(fragment) };
+}
+
+export function makeInlineClose(
+  registry: PlaceholderRegistry,
+  element: Element,
+  detail: PlaceholderDetail,
+): InlineCode {
+  const fragment = registry.add({
+    kind: 'inline',
+    xhtml: serialiseEndTag(element),
+    type: detail.type,
+    name: detail.name ?? null,
+    label: `end of ${collapse(detail.label)}`,
+  });
+  return { type: 'inlineCode', value: inlinePlaceholderValue(fragment) };
 }
 
 export function makeInlinePlaceholder(
