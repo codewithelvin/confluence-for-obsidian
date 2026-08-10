@@ -1,0 +1,1 @@
+<ac:structured-macro ac:name="jira" ac:schema-version="1"><ac:parameter ac:name="jqlQuery">project = ENG AND status = Open</ac:parameter></ac:structured-macro>

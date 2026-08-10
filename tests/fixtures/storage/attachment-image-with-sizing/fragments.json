@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<ac:image ac:width=\"400\" ac:height=\"300\"><ri:attachment ri:filename=\"wide.png\"/></ac:image>",
+    "type": "image",
+    "name": null,
+    "label": "image: wide.png"
+  }
+]

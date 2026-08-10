@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "block",
+    "xhtml": "<ac:structured-macro ac:name=\"toc\" ac:schema-version=\"1\"/>",
+    "type": "macro",
+    "name": "toc",
+    "label": "toc macro"
+  }
+]

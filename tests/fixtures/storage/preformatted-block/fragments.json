@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "block",
+    "xhtml": "<pre>raw   spacing\n  kept</pre>",
+    "type": "preformatted",
+    "name": null,
+    "label": "preformatted block"
+  }
+]

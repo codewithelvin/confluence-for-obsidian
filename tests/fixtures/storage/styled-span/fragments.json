@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<span style=\"color: rgb(255,0,0);\">red</span>",
+    "type": "span",
+    "name": null,
+    "label": "styled text: red"
+  }
+]

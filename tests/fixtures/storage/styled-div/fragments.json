@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "block",
+    "xhtml": "<div class=\"panel\"><p>Inside a styled div.</p></div>",
+    "type": "div",
+    "name": null,
+    "label": "styled block"
+  }
+]

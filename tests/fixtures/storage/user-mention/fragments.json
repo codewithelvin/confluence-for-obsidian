@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<ac:link><ri:user ri:userkey=\"ff8081814f0c1a2b014f0c1a2b3c4d5e\"/></ac:link>",
+    "type": "link",
+    "name": "ri:user",
+    "label": "user mention"
+  }
+]

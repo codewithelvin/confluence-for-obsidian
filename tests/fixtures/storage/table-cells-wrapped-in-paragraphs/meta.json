@@ -1,0 +1,4 @@
+{
+  "certified": false,
+  "notes": "Confluence sometimes wraps cell content in <p>. The forward pass unwraps a sole <p> so the table stays a real table; the reverse pass writes bare cells, so this form cannot be reproduced. Which form the real instance emits decides whether this should become certified — verify against confluence.cybernet.az."
+}

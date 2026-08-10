@@ -1,0 +1,5 @@
+{
+  "certified": true,
+  "unparseable": true,
+  "notes": "Must fail loudly and leave the page untouched rather than produce partial output."
+}

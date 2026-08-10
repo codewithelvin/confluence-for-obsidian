@@ -29,9 +29,9 @@ These are deliberate, not accidental:
 | Milestone | Scope                                                      | Status      |
 | --------- | ---------------------------------------------------------- | ----------- |
 | M0        | Build, lint, test harness, plugin lifecycle, settings      | ✅ Complete |
-| M1        | Confluence client, PAT authentication, space browser       | 🔬 Code complete, unverified against a live instance |
-| M2        | Storage-format ↔ Markdown converter, fidelity verification | Next        |
-| M3        | Subscriptions, read-only sync, folder hierarchy            |             |
+| M1        | Confluence client, PAT authentication, space browser       | ✅ Complete, verified against a live Data Center instance |
+| M2        | Storage-format ↔ Markdown converter, fidelity verification | ✅ Complete — 60-fixture corpus, 100% idempotence |
+| M3        | Subscriptions, read-only sync, folder hierarchy            | Next        |
 | M4        | Attachments, labels, comments                              |             |
 | M5        | Push with verification, conflict resolution                |             |
 | M6        | Create, delete, move, rename                               |             |

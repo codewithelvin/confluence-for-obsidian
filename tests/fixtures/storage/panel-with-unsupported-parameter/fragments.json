@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "block",
+    "xhtml": "<ac:structured-macro ac:name=\"info\" ac:schema-version=\"1\"><ac:parameter ac:name=\"icon\">false</ac:parameter><ac:rich-text-body><p>No icon.</p></ac:rich-text-body></ac:structured-macro>",
+    "type": "macro",
+    "name": "info",
+    "label": "info panel with unsupported parameters"
+  }
+]

@@ -26,5 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Connection management, connection testing, and a searchable space browser.
 - `npm run lint:boundaries`, which proves the architecture rules reject
   violations instead of merely being configured to.
+- Storage-format ↔ Markdown converter: headings, inline marks, lists, tables,
+  links, code macros, info/note/warning/tip panels, expand macros and task
+  lists, with everything else preserved verbatim as an opaque placeholder.
+- Both fidelity checks: pull-time certification decides whether a page can ever
+  be pushed safely, and push-time verification decides whether a specific edit
+  can. Neither ever guesses.
+- Golden corpus of 60 fixtures asserting 100% idempotence plus lossless
+  round-tripping wherever claimed, regenerated with `npm run test:bless`.
 
 [Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/commits/main

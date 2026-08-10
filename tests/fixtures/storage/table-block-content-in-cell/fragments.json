@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "block",
+    "xhtml": "<table><tbody><tr><th>A</th></tr><tr><td><ul><li>listed</li></ul></td></tr></tbody></table>",
+    "type": "table",
+    "name": null,
+    "label": "table with merged cells, block content, or no header row"
+  }
+]

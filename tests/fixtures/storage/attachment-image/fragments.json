@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<ac:image><ri:attachment ri:filename=\"diagram.png\"/></ac:image>",
+    "type": "image",
+    "name": null,
+    "label": "image: diagram.png"
+  }
+]

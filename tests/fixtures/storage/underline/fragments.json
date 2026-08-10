@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<u>underlined</u>",
+    "type": "unsupported",
+    "name": "u",
+    "label": "u: underlined"
+  }
+]

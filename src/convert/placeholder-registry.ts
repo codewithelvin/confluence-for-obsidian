@@ -1,0 +1,96 @@
+import type { Fragment, FragmentKind, FragmentMap } from './types';
+
+/**
+ * The placeholder contract (spec §6.4.3).
+ *
+ * Constructs Markdown cannot express become opaque placeholders, and their
+ * storage-format source is preserved verbatim for re-injection on push. This is
+ * what makes push safe: the plugin never reconstructs something it did not
+ * fully understand.
+ *
+ * Ids are assigned in document order so that converting unchanged content twice
+ * yields identical placeholders — required for the idempotence guarantee.
+ */
+
+export const BLOCK_FENCE_LANGUAGE = 'confluence-block';
+
+const ID_PREFIX = 'cfb-';
+const ID_DIGITS = 4;
+
+/** Inline form: `` `{cf:cfb-0001}` `` — inline code survives Markdown round-tripping unchanged. */
+const INLINE_PATTERN = /^\{cf:(cfb-\d+)\}$/;
+
+export interface FragmentInput {
+  readonly kind: FragmentKind;
+  readonly xhtml: string;
+  readonly type: string;
+  readonly name?: string | null;
+  readonly label: string;
+}
+
+export class PlaceholderRegistry {
+  private readonly fragments = new Map<string, Fragment>();
+  private counter = 0;
+
+  add(input: FragmentInput): Fragment {
+    this.counter += 1;
+    const id = `${ID_PREFIX}${String(this.counter).padStart(ID_DIGITS, '0')}`;
+
+    const fragment: Fragment = {
+      id,
+      kind: input.kind,
+      xhtml: input.xhtml,
+      type: input.type,
+      name: input.name ?? null,
+      label: input.label,
+    };
+
+    this.fragments.set(id, fragment);
+    return fragment;
+  }
+
+  snapshot(): FragmentMap {
+    return new Map(this.fragments);
+  }
+
+  get size(): number {
+    return this.fragments.size;
+  }
+}
+
+/** The text inside a `{cf:…}` inline placeholder. */
+export function inlinePlaceholderValue(fragment: Fragment): string {
+  return `{cf:${fragment.id}}`;
+}
+
+/** Extracts a fragment id from inline-code content, or `null` if it is ordinary code. */
+export function readInlinePlaceholderId(inlineCodeValue: string): string | null {
+  return INLINE_PATTERN.exec(inlineCodeValue.trim())?.[1] ?? null;
+}
+
+/**
+ * Body of a `confluence-block` fence. Deliberately a flat `key: value` list
+ * rather than JSON: it stays readable in the editor, and a user who damages it
+ * produces a missing-fragment error rather than silently valid-looking data.
+ */
+export function blockPlaceholderBody(fragment: Fragment): string {
+  const lines = [`id: ${fragment.id}`, `type: ${fragment.type}`];
+  if (fragment.name !== null) lines.push(`name: ${fragment.name}`);
+  if (fragment.label.length > 0) lines.push(`label: ${collapse(fragment.label)}`);
+  return lines.join('\n');
+}
+
+/** Extracts a fragment id from a `confluence-block` fence body. */
+export function readBlockPlaceholderId(fenceBody: string): string | null {
+  for (const line of fenceBody.split('\n')) {
+    const match = /^\s*id:\s*(cfb-\d+)\s*$/.exec(line);
+    if (match?.[1] !== undefined) return match[1];
+  }
+  return null;
+}
+
+/** Single-line, trimmed, length-bounded text for a placeholder label. */
+export function collapse(text: string, maxLength = 120): string {
+  const single = text.replace(/\s+/g, ' ').trim();
+  return single.length <= maxLength ? single : `${single.slice(0, maxLength - 1)}…`;
+}

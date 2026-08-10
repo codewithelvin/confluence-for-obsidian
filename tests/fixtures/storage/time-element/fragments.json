@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<time datetime=\"2026-08-31\"/>",
+    "type": "date",
+    "name": null,
+    "label": "date: 2026-08-31"
+  }
+]

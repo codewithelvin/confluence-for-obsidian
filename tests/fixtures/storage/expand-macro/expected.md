@@ -1,0 +1,3 @@
+> [!note]- Details
+>
+> Hidden text.
