@@ -79,14 +79,47 @@ function serialiseAttributes(element: Element, options: SerialiseOptions): strin
     .join('');
 }
 
-function serialiseNode(node: Node, options: SerialiseOptions, preserve: boolean): string {
+/**
+ * Elements whose children are blocks, so whitespace between them is layout
+ * rather than content.
+ *
+ * Everywhere else — inside a paragraph, cell, list item or emphasis — a run of
+ * whitespace separates words and must survive, collapsed to a single space.
+ * Dropping it everywhere made normalisation asymmetric: `1.` followed by a
+ * `&nbsp;` in its own text node lost the space, while `1. ` in one text node
+ * kept it, so two identical documents compared unequal.
+ */
+const BLOCK_CONTAINERS = new Set([
+  'storage-root',
+  'div',
+  'ul',
+  'ol',
+  'table',
+  'thead',
+  'tbody',
+  'tfoot',
+  'tr',
+  'colgroup',
+  'ac:layout',
+  'ac:layout-section',
+  'ac:task-list',
+]);
+
+function serialiseNode(
+  node: Node,
+  options: SerialiseOptions,
+  preserve: boolean,
+  parentTag: string,
+): string {
   switch (node.nodeType) {
     case Node.TEXT_NODE:
     case Node.CDATA_SECTION_NODE: {
       const text = node.nodeValue ?? '';
       if (preserve || !options.collapseWhitespace) return escapeText(text);
+
       const collapsed = text.replace(/\s+/g, ' ');
-      return collapsed.trim().length === 0 ? '' : escapeText(collapsed);
+      if (collapsed.trim().length > 0) return escapeText(collapsed);
+      return BLOCK_CONTAINERS.has(parentTag) ? '' : escapeText(collapsed);
     }
     case Node.COMMENT_NODE:
       // Kept, so that losing a comment shows up as a real difference.
@@ -97,6 +130,9 @@ function serialiseNode(node: Node, options: SerialiseOptions, preserve: boolean)
       return '';
   }
 }
+
+/** Cells cannot carry edge whitespace through a Markdown table, and it is invisible. */
+const TRIMS_EDGE_WHITESPACE = new Set(['td', 'th']);
 
 export function serialiseElement(
   element: Element,
@@ -130,7 +166,12 @@ export function serialiseEndTag(element: Element): string {
 }
 
 export function serialiseChildren(node: Node, options: SerialiseOptions, preserve = false): string {
-  return Array.from(node.childNodes)
-    .map((child) => serialiseNode(child, options, preserve))
+  const parentTag = node.nodeName.toLowerCase();
+  const serialised = Array.from(node.childNodes)
+    .map((child) => serialiseNode(child, options, preserve, parentTag))
     .join('');
+
+  return options.collapseWhitespace && TRIMS_EDGE_WHITESPACE.has(parentTag)
+    ? serialised.trim()
+    : serialised;
 }

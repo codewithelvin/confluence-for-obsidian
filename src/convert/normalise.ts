@@ -86,6 +86,35 @@ function unwrapBareSpans(root: Element): void {
   }
 }
 
+/**
+ * Puts nested bold-and-italic into one order.
+ *
+ * `<strong><em>x</em></strong>` and `<em><strong>x</strong></em>` render
+ * identically, and Markdown writes both as `***x***`, which re-parses into a
+ * single fixed order. Comparing the two as different would make every page
+ * using bold italics read-only over nesting that carries no meaning.
+ */
+function canonicaliseNestedEmphasis(root: Element): void {
+  for (const outer of Array.from(root.querySelectorAll('em, i'))) {
+    const children = Array.from(outer.childNodes);
+    const inner = children.length === 1 ? children[0] : undefined;
+    if (inner === undefined || inner.nodeType !== Node.ELEMENT_NODE) continue;
+
+    const innerTag = (inner as Element).nodeName.toLowerCase();
+    if (innerTag !== 'strong' && innerTag !== 'b') continue;
+
+    const parent = outer.parentNode;
+    if (parent === null) continue;
+
+    // Swap: <em><strong>x</strong></em> becomes <strong><em>x</em></strong>.
+    const strong = inner as Element;
+    parent.insertBefore(strong, outer);
+    parent.removeChild(outer);
+    while (strong.firstChild !== null) outer.appendChild(strong.firstChild);
+    strong.appendChild(outer);
+  }
+}
+
 /** Makes implicit same-space page references explicit, so both forms compare equal. */
 function applyDefaultSpaceKey(root: Element, spaceKey: string): void {
   for (const page of Array.from(root.getElementsByTagName('ri:page'))) {
@@ -110,6 +139,7 @@ export function normaliseStorage(xhtml: string, options: NormaliseOptions = {}):
 
   unwrapBareSpans(parsed.value);
   unwrapSoleParagraphs(parsed.value);
+  canonicaliseNestedEmphasis(parsed.value);
 
   if (options.defaultSpaceKey !== undefined) {
     applyDefaultSpaceKey(parsed.value, options.defaultSpaceKey);

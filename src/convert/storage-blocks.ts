@@ -167,7 +167,11 @@ function isSpacerParagraph(element: Element): boolean {
  * which round-trips exactly and still renders as blank space.
  */
 function convertParagraph(element: Element, ctx: ConversionContext): RootContent[] {
-  if (isSpacerParagraph(element)) {
+  // A spacer paragraph, or one carrying alignment such as
+  // `<p style="text-align: center;">`, has to be written out verbatim: Markdown
+  // has neither an empty paragraph that survives a parse nor a way to hold
+  // paragraph attributes.
+  if (isSpacerParagraph(element) || element.attributes.length > 0) {
     return [{ type: 'html', value: serialiseElement(element, FAITHFUL) }];
   }
   return [{ type: 'paragraph', children: ctx.convertPhrasing(childrenOf(element)) }];
@@ -190,6 +194,23 @@ function convertHeading(
   return [{ type: 'heading', depth, children: ctx.convertPhrasing(childrenOf(element)) }];
 }
 
+/**
+ * Confluence marks nested wrapper items with
+ * `<li style="list-style-type: none;">`, which a Markdown list cannot carry.
+ * Preserving such a list keeps the rest of the page editable.
+ */
+function convertListBlock(element: Element, ctx: ConversionContext): RootContent[] {
+  if (elementsOf(element).some((item) => item.attributes.length > 0)) {
+    return [
+      makeBlockPlaceholder(ctx.placeholders, element, {
+        type: 'list',
+        label: 'list with item styling',
+      }),
+    ];
+  }
+  return [convertList(element, ctx)];
+}
+
 function convertBlockElement(element: Element, ctx: ConversionContext): RootContent[] {
   const tag = tagOf(element);
   const depth = HEADINGS[tag];
@@ -200,7 +221,7 @@ function convertBlockElement(element: Element, ctx: ConversionContext): RootCont
       return convertParagraph(element, ctx);
     case 'ul':
     case 'ol':
-      return [convertList(element, ctx)];
+      return convertListBlock(element, ctx);
     case 'ac:task-list':
       return [convertTaskList(element, ctx)];
     case 'blockquote':

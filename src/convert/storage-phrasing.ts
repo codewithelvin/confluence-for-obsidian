@@ -293,8 +293,17 @@ function separateAdjacentCode(nodes: readonly PhrasingContent[]): PhrasingConten
  * exactly and renders identically.
  */
 function htmlTrailingBreak(nodes: readonly PhrasingContent[]): PhrasingContent[] {
-  if (nodes[nodes.length - 1]?.type !== 'break') return [...nodes];
-  return [...nodes.slice(0, -1), { type: 'html', value: '<br/>' }];
+  const output = [...nodes];
+
+  // The whole trailing run, not just the last one: `<br/><br/>` at the end of a
+  // list item is common, and a Markdown hard break only works when more content
+  // follows it.
+  for (let index = output.length - 1; index >= 0; index -= 1) {
+    if (output[index]?.type !== 'break') break;
+    output[index] = { type: 'html', value: '<br/>' };
+  }
+
+  return output;
 }
 
 export function convertPhrasingNodes(
