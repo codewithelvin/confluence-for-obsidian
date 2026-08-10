@@ -93,10 +93,15 @@ export class Plugin {
     this.settingTabs.push(tab);
   }
 
+  readonly commands: { id: string; name: string; callback?: () => unknown }[] = [];
+
   registerEvent(): void {}
   registerInterval(): void {}
   registerDomEvent(): void {}
-  addCommand(): void {}
+
+  addCommand(command: { id: string; name: string; callback?: () => unknown }): void {
+    this.commands.push(command);
+  }
 }
 
 export class PluginSettingTab {
@@ -248,9 +253,22 @@ export class ButtonComponent {
 /** Records notices so tests can assert on user-facing messages. */
 export class Notice {
   static readonly shown: string[] = [];
+  message: string;
+  hidden = false;
 
-  constructor(readonly message: string) {
+  constructor(message: string, _duration?: number) {
+    this.message = message;
     Notice.shown.push(message);
+  }
+
+  setMessage(message: string): this {
+    this.message = message;
+    Notice.shown.push(message);
+    return this;
+  }
+
+  hide(): void {
+    this.hidden = true;
   }
 
   static reset(): void {

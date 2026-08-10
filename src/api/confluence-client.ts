@@ -3,9 +3,13 @@ import { err, ok, type Result } from '../util/result';
 import type { Logger } from '../util/logger';
 import { meetsMinimumVersion, type SemanticVersion } from '../util/version';
 import {
-  parseSpace,
+  parsePage,
+  parsePageSummary,
   parsePaged,
+  parseSpace,
   parseUser,
+  type ConfluencePage,
+  type ConfluencePageSummary,
   type ConfluenceSpace,
   type ConfluenceUser,
   type Parser,
@@ -102,6 +106,35 @@ export class ConfluenceClient {
       options.includePersonal === true
         ? spaces.value
         : spaces.value.filter((space) => space.type !== 'personal'),
+    );
+  }
+
+  /** Lists pages in a space, newest first, up to `limit`. */
+  async listPages(
+    spaceKey: string,
+    limit: number,
+  ): Promise<Result<ConfluencePageSummary[], AppError>> {
+    const page = await this.getJson(
+      ENDPOINTS.content,
+      { spaceKey, type: 'page', limit, start: 0 },
+      (raw) => parsePaged(raw, parsePageSummary),
+    );
+    if (!page.ok) return page;
+    return ok([...page.value.results]);
+  }
+
+  /**
+   * Fetches one page including its storage body.
+   *
+   * `body.storage` is requested explicitly: without it Confluence returns a
+   * page with no body, which would convert to an empty note and, on a later
+   * push, blank the page.
+   */
+  async getPage(id: string): Promise<Result<ConfluencePage, AppError>> {
+    return this.getJson(
+      ENDPOINTS.contentById(id),
+      { expand: 'body.storage,version,space,ancestors' },
+      parsePage,
     );
   }
 

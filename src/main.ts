@@ -9,6 +9,7 @@ import {
   realScheduler,
 } from './api/rate-limiter';
 import { CredentialStore, resolveSafeStorage } from './auth/credential-store';
+import { registerCommands } from './commands/register-commands';
 import { SettingsStore } from './settings/settings-store';
 import { ConfluenceSettingTab } from './settings/settings-tab';
 import type { ConnectionProfile } from './settings/settings-types';
@@ -56,6 +57,13 @@ export default class ConfluenceConnectorPlugin extends Plugin {
         newId,
       }),
     );
+
+    registerCommands({
+      plugin: this,
+      store: this.settingsStore,
+      credentials: this.credentials,
+      createClient: (connection) => this.createClient(connection),
+    });
 
     if (!this.credentials.persistenceAvailable) {
       this.logger.warn(

@@ -146,7 +146,7 @@ export default tseslint.config(
   // own `no-restricted-imports` above, and a second entry here would replace
   // it rather than add to it.
   {
-    files: ['src/{sync,ui,settings,commands,util,auth}/**/*.ts', 'src/main.ts'],
+    files: ['src/{sync,ui,settings,commands,util,auth,diagnostics}/**/*.ts', 'src/main.ts'],
     rules: {
       'no-restricted-imports': ['error', { paths: [NO_REQUEST_URL] }],
     },
