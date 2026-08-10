@@ -2,6 +2,7 @@ import type { PhrasingContent } from 'mdast';
 import { makeInlineClose, makeInlineOpen, makeInlinePlaceholder } from './placeholder-factory';
 import { CODE_SEPARATOR, collapse, readInlinePlaceholderId } from './placeholder-registry';
 import { childrenOf, riAttr, tagOf } from './storage-parser';
+import { FAITHFUL, serialiseElement } from './storage-serialiser';
 import type { ConversionContext } from './types';
 
 /**
@@ -116,6 +117,15 @@ function convertAnchor(
   const href = element.getAttribute('href');
   if (href === null) return ctx.convertPhrasing(childrenOf(element));
 
+  // An `<a href>` pointing at a Confluence page and an `ac:link` to the same
+  // page both render as the same Markdown link, so the reverse pass could not
+  // tell them apart and turned every such anchor into an `ac:link`. Preserving
+  // the anchor as a pair keeps the two distinguishable while its text stays
+  // readable.
+  if (href.startsWith(`${ctx.baseUrl}/display/`)) {
+    return preserveWrapper(element, ctx, { type: 'link', label: 'link to a Confluence page' });
+  }
+
   return {
     type: 'link',
     url: href,
@@ -176,7 +186,11 @@ export function convertPhrasingElement(
     case 'code':
       return convertCode(element, ctx);
     case 'br':
-      return { type: 'break' };
+      // Confluence writes `<br class="atl-forced-newline"/>`, and a Markdown
+      // hard break cannot carry the class.
+      return element.attributes.length === 0
+        ? { type: 'break' }
+        : { type: 'html', value: serialiseElement(element, FAITHFUL) };
     case 'a':
       return convertAnchor(element, ctx);
     case 'span':

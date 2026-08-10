@@ -1,4 +1,4 @@
 {
-  "certified": false,
-  "notes": "Confluence sometimes wraps cell content in <p>. The forward pass unwraps a sole <p> so the table stays a real table; the reverse pass writes bare cells, so this form cannot be reproduced. Which form the real instance emits decides whether this should become certified — verify against confluence.cybernet.az."
+  "certified": true,
+  "notes": "Answered by probing space EP: 35 of 50 pages wrap cell content in <p> and 6 do not, so both forms are real and common. Rather than pick one and leave the other group permanently read-only, normalisation now treats a cell or list item whose sole child is a paragraph as equivalent to one holding the content directly — Confluence renders them identically and accepts either on update."
 }

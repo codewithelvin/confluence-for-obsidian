@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "id": "cfb-0001",
+    "kind": "block",
+    "xhtml": "<table ac:local-id=\"1a2b3c\"><tbody><tr><th>A</th></tr><tr><td>x</td></tr></tbody></table>",
+    "type": "table",
+    "name": null,
+    "label": "table with merged cells, block content, or no header row"
+  }
+]

@@ -34,6 +34,39 @@ export interface NormaliseOptions {
   readonly defaultSpaceKey?: string;
 }
 
+/**
+ * Elements whose sole child paragraph carries no meaning of its own.
+ *
+ * Confluence writes both `<td><p>x</p></td>` and `<td>x</td>`, and both
+ * `<li><p>x</p></li>` and `<li>x</li>`, for identical rendered output — the
+ * editor picks one depending on how the content was created. In space EP, 35
+ * pages use the wrapped form and 6 the bare form, so treating them as different
+ * would leave one group or the other permanently read-only whichever way the
+ * converter writes them.
+ */
+const SOLE_PARAGRAPH_HOSTS = new Set(['td', 'th', 'li']);
+
+/** Replaces a lone `<p>` inside a cell or list item with its contents. */
+function unwrapSoleParagraphs(root: Element): void {
+  for (const host of Array.from(root.querySelectorAll('td, th, li'))) {
+    if (!SOLE_PARAGRAPH_HOSTS.has(host.nodeName.toLowerCase())) continue;
+
+    const significant = Array.from(host.childNodes).filter(
+      (child) =>
+        !(child.nodeType === Node.TEXT_NODE && (child.nodeValue ?? '').trim().length === 0),
+    );
+    const only = significant.length === 1 ? significant[0] : undefined;
+    if (only === undefined || only.nodeType !== Node.ELEMENT_NODE) continue;
+    if ((only as Element).nodeName.toLowerCase() !== 'p') continue;
+
+    const paragraph = only as Element;
+    while (paragraph.firstChild !== null) {
+      host.insertBefore(paragraph.firstChild, paragraph);
+    }
+    host.removeChild(paragraph);
+  }
+}
+
 /** Makes implicit same-space page references explicit, so both forms compare equal. */
 function applyDefaultSpaceKey(root: Element, spaceKey: string): void {
   for (const page of Array.from(root.getElementsByTagName('ri:page'))) {
@@ -55,6 +88,8 @@ export function normaliseStorage(xhtml: string, options: NormaliseOptions = {}):
   if (!parsed.ok) {
     return xhtml.replace(/\s+/g, ' ').trim();
   }
+
+  unwrapSoleParagraphs(parsed.value);
 
   if (options.defaultSpaceKey !== undefined) {
     applyDefaultSpaceKey(parsed.value, options.defaultSpaceKey);

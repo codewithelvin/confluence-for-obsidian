@@ -331,14 +331,12 @@ describe('certify', () => {
   });
 
   it('returns the Markdown and fragments even when certification fails', () => {
-    // Cells wrapped in <p> are unwrapped so the table stays a real table; the
-    // reverse pass writes bare cells, so this form cannot be reproduced.
-    const degraded =
-      '<table><tbody><tr><th><p>Name</p></th></tr><tr><td><p>a</p></td></tr></tbody></table>';
-    const result = certify(degraded, OPTIONS);
+    // Both <del> and <s> mean strikethrough and both convert to `~~text~~`, so
+    // the reverse pass can only produce one of them. <del> cannot be reproduced.
+    const result = certify('<p>A <del>removed</del> word.</p>', OPTIONS);
 
     expect(result.ok && result.value.certified).toBe(false);
-    expect(result.ok && result.value.markdown).toContain('Name');
+    expect(result.ok && result.value.markdown).toContain('removed');
     expect(result.ok && result.value.detail).not.toBeNull();
   });
 

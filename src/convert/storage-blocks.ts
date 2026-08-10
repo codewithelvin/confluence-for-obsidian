@@ -147,13 +147,27 @@ function convertParagraph(element: Element, ctx: ConversionContext): RootContent
   return [{ type: 'paragraph', children: ctx.convertPhrasing(childrenOf(element)) }];
 }
 
+/**
+ * A Markdown heading has nowhere to carry attributes, and Confluence writes
+ * `<h1 class="auto-cursor-target" style="text-align: right;">` routinely.
+ * Emitting such a heading verbatim keeps its alignment and round-trips exactly;
+ * Obsidian renders raw HTML in reading view, so it still looks like a heading.
+ */
+function convertHeading(
+  element: Element,
+  depth: Heading['depth'],
+  ctx: ConversionContext,
+): RootContent[] {
+  if (element.attributes.length > 0) {
+    return [{ type: 'html', value: serialiseElement(element, FAITHFUL) }];
+  }
+  return [{ type: 'heading', depth, children: ctx.convertPhrasing(childrenOf(element)) }];
+}
+
 function convertBlockElement(element: Element, ctx: ConversionContext): RootContent[] {
   const tag = tagOf(element);
   const depth = HEADINGS[tag];
-
-  if (depth !== undefined) {
-    return [{ type: 'heading', depth, children: ctx.convertPhrasing(childrenOf(element)) }];
-  }
+  if (depth !== undefined) return convertHeading(element, depth, ctx);
 
   switch (tag) {
     case 'p':

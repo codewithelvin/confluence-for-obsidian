@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<ac:image ac:title=\"Homepage.jpg\" ac:thumbnail=\"true\"><ri:url ri:value=\"https://confluence.example.com/plugins/servlet/confluence/placeholder/unknown-attachment?locale=ru_RU&amp;version=2\"/></ac:image>",
+    "type": "image",
+    "name": null,
+    "label": "image: embedded"
+  }
+]

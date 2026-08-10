@@ -1,0 +1,34 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<span style=\"color: rgb(17,85,204);\">",
+    "type": "span",
+    "name": null,
+    "label": "styled text"
+  },
+  {
+    "id": "cfb-0002",
+    "kind": "inline",
+    "xhtml": "<span style=\"color: rgb(0,0,0);\">",
+    "type": "span",
+    "name": null,
+    "label": "styled text"
+  },
+  {
+    "id": "cfb-0003",
+    "kind": "inline",
+    "xhtml": "</span>",
+    "type": "span",
+    "name": null,
+    "label": "end of styled text"
+  },
+  {
+    "id": "cfb-0004",
+    "kind": "inline",
+    "xhtml": "</span>",
+    "type": "span",
+    "name": null,
+    "label": "end of styled text"
+  }
+]

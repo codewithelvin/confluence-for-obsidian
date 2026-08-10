@@ -1,0 +1,1 @@
+<h1 class="auto-cursor-target" style="text-align: right;"><a href="https://confluence.example.com/display/ENG/Home"><ac:image ac:thumbnail="true" ac:width="50"><ri:attachment ri:filename="Homepage.jpg"/></ac:image></a></h1>

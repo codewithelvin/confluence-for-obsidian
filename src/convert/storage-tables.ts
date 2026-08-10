@@ -103,6 +103,15 @@ interface SimpleTable {
  * content only.
  */
 export function analyseTable(table: Element): SimpleTable | null {
+  // Confluence tables routinely carry `class="wrapped"` and a `<colgroup>` of
+  // percentage column widths, and cells carry highlight classes. A GFM table
+  // can express none of it. Converting anyway would drop real formatting and
+  // make the whole page read-only; preserving the table keeps the prose around
+  // it editable, at the cost of the table itself being opaque until the
+  // placeholder renderer can display it.
+  if (table.attributes.length > 0) return null;
+  if (elementsOf(table).some((child) => tagOf(child) === 'colgroup')) return null;
+
   const rows = rowsOf(table);
   if (rows.length === 0) return null;
 
@@ -120,6 +129,9 @@ export function analyseTable(table: Element): SimpleTable | null {
     const converted: (readonly Node[])[] = [];
     for (const cell of cells) {
       if (hasSpan(cell)) return null;
+      // Cell attributes carry highlight colours and titles a Markdown table
+      // cannot hold.
+      if (cell.attributes.length > 0) return null;
       const inline = cellInlineNodes(cell);
       if (inline === null) return null;
       converted.push(inline);
