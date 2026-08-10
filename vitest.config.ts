@@ -27,14 +27,24 @@ export default defineConfig({
         // Type-only modules emit no runtime code.
         'src/**/*-types.ts',
       ],
-      // Overall gates from spec §8.1. Per-area gates (convert 95%, sync 90%,
-      // vault 90%, api 85%) are added in the milestone that creates each area,
-      // because a glob matching zero files cannot be meaningfully enforced.
+      // Gates from spec §8.1. Per-area gates are added by the milestone that
+      // creates each area, because a glob matching zero files enforces nothing.
+      // `convert` (95/95) and `sync` (90/85) arrive with M2 and M3.
+      //
+      // Values sit a few points below measured coverage: high enough to catch
+      // a real regression, with enough headroom that an ordinary refactor does
+      // not fail CI for no reason.
       thresholds: {
-        lines: 85,
-        functions: 85,
-        branches: 80,
-        statements: 85,
+        lines: 90,
+        functions: 90,
+        branches: 88,
+        statements: 90,
+        'src/api/**': { lines: 90, functions: 85, branches: 88, statements: 90 },
+        // Security-critical: this is the code holding the promise that a token
+        // never reaches disk in plain text.
+        'src/auth/**': { lines: 95, functions: 90, branches: 85, statements: 95 },
+        'src/settings/**': { lines: 90, functions: 85, branches: 90, statements: 90 },
+        'src/util/**': { lines: 90, functions: 90, branches: 88, statements: 90 },
       },
     },
   },

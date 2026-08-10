@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Plugin } from 'obsidian';
 import { ConfluenceSettingTab } from '../../src/settings/settings-tab';
 import { SettingsStore } from '../../src/settings/settings-store';
+import { CredentialStore } from '../../src/auth/credential-store';
+import type { ConfluenceClient } from '../../src/api/confluence-client';
 import { Logger } from '../../src/util/logger';
 import { App as FakeApp, Plugin as FakePlugin, type PluginManifest } from '../fakes/obsidian';
 
@@ -17,8 +19,16 @@ const manifest: PluginManifest = {
 
 function setup(): { store: SettingsStore; tab: ConfluenceSettingTab } {
   const plugin = new FakePlugin(new FakeApp(), manifest);
-  const store = new SettingsStore(plugin, new Logger('test', () => false));
-  const tab = new ConfluenceSettingTab(plugin as unknown as Plugin, store);
+  const logger = new Logger('test', () => false);
+  const store = new SettingsStore(plugin, logger);
+  const tab = new ConfluenceSettingTab(plugin as unknown as Plugin, {
+    store,
+    credentials: new CredentialStore(null, store, logger),
+    createClient: (): ConfluenceClient => {
+      throw new Error('no client should be created while rendering');
+    },
+    newId: () => 'test-connection-id',
+  });
   return { store, tab };
 }
 
@@ -40,7 +50,21 @@ describe('ConfluenceSettingTab', () => {
     const { tab } = setup();
     tab.display();
     const headings = tab.containerEl.querySelectorAll('.setting-item-heading');
-    expect(headings).toHaveLength(3);
+    expect(headings).toHaveLength(4);
+  });
+
+  it('creates no Confluence client merely by rendering', () => {
+    // Rendering settings must never touch the network; setup() throws if a
+    // client is constructed.
+    const { tab } = setup();
+    expect(() => tab.display()).not.toThrow();
+  });
+
+  it('warns when the OS keychain is unavailable', () => {
+    const { tab } = setup();
+    tab.display();
+    const warning = tab.containerEl.querySelector('.confluence-connection-status.is-error');
+    expect(warning?.textContent).toContain('keychain is unavailable');
   });
 
   it('renders all current settings as controls', () => {

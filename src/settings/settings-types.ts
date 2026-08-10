@@ -27,6 +27,16 @@ export interface PluginSettings {
   readonly connections: readonly ConnectionProfile[];
   readonly subscriptions: readonly Subscription[];
 
+  /**
+   * connectionId -> Personal Access Token ciphertext, base64.
+   *
+   * Encrypted by the operating system keychain (spec D5, FR-1.4), so the value
+   * is useless on any other machine and a synced or backed-up vault leaks
+   * nothing. A plaintext token must never be written here under any
+   * circumstances, including the no-keyring fallback (FR-1.5).
+   */
+  readonly credentials: Readonly<Record<string, string>>;
+
   /** Skip attachments larger than this, leaving a placeholder link (spec FR-8.4). */
   readonly attachmentSizeLimitMb: number;
   /** Download only attachments referenced in the page body (spec FR-8.5). */

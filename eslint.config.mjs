@@ -10,6 +10,18 @@ const LAYER_MESSAGE =
 const PURITY_MESSAGE =
   'Converters must be pure (spec §7.5): no I/O, no Obsidian API, no clock, no randomness. This is what makes them exhaustively testable.';
 
+/**
+ * Only `src/api/` may perform HTTP. This restriction is repeated into each
+ * layer block rather than declared once in a catch-all: flat-config rule
+ * entries REPLACE rather than merge, so an overlapping later block would
+ * silently wipe the layer patterns declared above it.
+ */
+const NO_REQUEST_URL = {
+  name: 'obsidian',
+  importNames: ['requestUrl'],
+  message: 'All Confluence HTTP goes through ConfluenceClient in src/api/ (spec §6.1, hard rule).',
+};
+
 export default tseslint.config(
   {
     ignores: ['main.js', 'coverage/**', 'node_modules/**', 'dist/**'],
@@ -121,28 +133,22 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [{ group: ['**/api/**', '**/sync/**', '**/ui/**'], message: LAYER_MESSAGE }] },
+        {
+          paths: [NO_REQUEST_URL],
+          patterns: [{ group: ['**/api/**', '**/sync/**', '**/ui/**'], message: LAYER_MESSAGE }],
+        },
       ],
     },
   },
 
-  // ------------------------------- only the API gateway may perform HTTP I/O
+  // ---------------- every remaining layer: no HTTP outside the API gateway.
+  // `convert`, `api` and `vault` are deliberately absent — they declare their
+  // own `no-restricted-imports` above, and a second entry here would replace
+  // it rather than add to it.
   {
-    files: ['src/{convert,vault,sync,ui,settings,commands,util,auth}/**/*.ts', 'src/main.ts'],
+    files: ['src/{sync,ui,settings,commands,util,auth}/**/*.ts', 'src/main.ts'],
     rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          paths: [
-            {
-              name: 'obsidian',
-              importNames: ['requestUrl'],
-              message:
-                'All Confluence HTTP goes through ConfluenceClient in src/api/ (spec §6.1, hard rule).',
-            },
-          ],
-        },
-      ],
+      'no-restricted-imports': ['error', { paths: [NO_REQUEST_URL] }],
     },
   },
 
@@ -159,6 +165,9 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       '@typescript-eslint/unbound-method': 'off',
+      // Tests must be able to simulate badly-behaved code that rejects with a
+      // non-Error, because Electron and Node both do.
+      '@typescript-eslint/prefer-promise-reject-errors': 'off',
       'max-lines': 'off',
       'max-lines-per-function': 'off',
       'no-console': 'off',

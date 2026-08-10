@@ -204,10 +204,108 @@ export class Setting {
     build(new TextComponent(this.controlEl));
     return this;
   }
+
+  addButton(build: (button: ButtonComponent) => unknown): this {
+    build(new ButtonComponent(this.controlEl));
+    return this;
+  }
 }
 
+export class ButtonComponent {
+  readonly buttonEl: HTMLButtonElement;
+
+  constructor(containerEl: HTMLElement) {
+    this.buttonEl = containerEl.ownerDocument.createElement('button');
+    containerEl.appendChild(this.buttonEl);
+  }
+
+  setButtonText(text: string): this {
+    this.buttonEl.textContent = text;
+    return this;
+  }
+
+  setCta(): this {
+    this.buttonEl.classList.add('mod-cta');
+    return this;
+  }
+
+  setWarning(): this {
+    this.buttonEl.classList.add('mod-warning');
+    return this;
+  }
+
+  setDisabled(disabled: boolean): this {
+    this.buttonEl.disabled = disabled;
+    return this;
+  }
+
+  onClick(callback: () => unknown): this {
+    this.buttonEl.addEventListener('click', () => void callback());
+    return this;
+  }
+}
+
+/** Records notices so tests can assert on user-facing messages. */
 export class Notice {
-  constructor(readonly message: string) {}
+  static readonly shown: string[] = [];
+
+  constructor(readonly message: string) {
+    Notice.shown.push(message);
+  }
+
+  static reset(): void {
+    Notice.shown.length = 0;
+  }
+}
+
+export class Modal {
+  readonly containerEl: HTMLElement;
+  readonly titleEl: HTMLElement;
+  readonly contentEl: HTMLElement;
+  isOpen = false;
+
+  constructor(readonly app: App) {
+    this.containerEl = document.createElement('div');
+    this.titleEl = this.containerEl.appendChild(document.createElement('div'));
+    this.contentEl = this.containerEl.appendChild(document.createElement('div'));
+  }
+
+  open(): void {
+    this.isOpen = true;
+    this.onOpen();
+  }
+
+  close(): void {
+    this.isOpen = false;
+    this.onClose();
+  }
+
+  onOpen(): void {}
+  onClose(): void {}
+}
+
+export interface FakeRequestUrlResponse {
+  status: number;
+  headers: Record<string, string>;
+  text: string;
+}
+
+type RequestUrlHandler = (param: unknown) => Promise<FakeRequestUrlResponse>;
+
+let requestUrlHandler: RequestUrlHandler = () =>
+  Promise.reject(new Error('requestUrl was called without a stub'));
+
+/** Installs the response (or failure) the next requestUrl call should produce. */
+export function setRequestUrlHandler(handler: RequestUrlHandler): void {
+  requestUrlHandler = handler;
+}
+
+export function resetRequestUrlHandler(): void {
+  requestUrlHandler = () => Promise.reject(new Error('requestUrl was called without a stub'));
+}
+
+export function requestUrl(param: unknown): Promise<FakeRequestUrlResponse> {
+  return requestUrlHandler(param);
 }
 
 export function normalizePath(path: string): string {

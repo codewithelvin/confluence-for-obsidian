@@ -4,7 +4,7 @@ An Obsidian plugin that turns a Confluence **Data Center** space — or any subt
 
 The model is the one developers already have with source code: **pull, edit locally in a fast editor, push back.** Confluence stays the system of record; Obsidian becomes the editing surface.
 
-> **Status: in development (M0 complete).** Not yet usable. There is no Confluence connectivity yet — see the roadmap below.
+> **Status: in development.** Not yet usable. You can connect to a Confluence Data Center instance and browse its spaces, but nothing is mirrored into the vault yet — syncing arrives in M3. See the roadmap below.
 
 ## Requirements
 
@@ -29,8 +29,8 @@ These are deliberate, not accidental:
 | Milestone | Scope                                                      | Status      |
 | --------- | ---------------------------------------------------------- | ----------- |
 | M0        | Build, lint, test harness, plugin lifecycle, settings      | ✅ Complete |
-| M1        | Confluence client, PAT authentication, space browser       | Next        |
-| M2        | Storage-format ↔ Markdown converter, fidelity verification |             |
+| M1        | Confluence client, PAT authentication, space browser       | 🔬 Code complete, unverified against a live instance |
+| M2        | Storage-format ↔ Markdown converter, fidelity verification | Next        |
 | M3        | Subscriptions, read-only sync, folder hierarchy            |             |
 | M4        | Attachments, labels, comments                              |             |
 | M5        | Push with verification, conflict resolution                |             |

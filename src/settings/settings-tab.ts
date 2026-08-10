@@ -1,26 +1,38 @@
 import { PluginSettingTab, Setting } from 'obsidian';
 import type { Plugin } from 'obsidian';
+import { ConnectionsSection, type ConnectionsSectionDeps } from '../ui/connections-section';
 import type { SettingsStore } from './settings-store';
+
+/** Everything the tab needs; `app` and `refresh` are supplied by the tab itself. */
+export type SettingsTabDeps = Omit<ConnectionsSectionDeps, 'app' | 'refresh'>;
 
 /**
  * Settings UI. Presentation only — it reads and writes the store and holds no
  * business logic (spec §7.5).
  *
- * Connection and subscription management land in M1 and M3 respectively; this
- * tab exposes exactly the settings that exist today.
+ * Subscription management lands in M3.
  */
 export class ConfluenceSettingTab extends PluginSettingTab {
-  constructor(
-    plugin: Plugin,
-    private readonly store: SettingsStore,
-  ) {
+  private readonly store: SettingsStore;
+  private readonly connections: ConnectionsSection;
+
+  constructor(plugin: Plugin, deps: SettingsTabDeps) {
     super(plugin.app, plugin);
+    this.store = deps.store;
+    this.connections = new ConnectionsSection({
+      ...deps,
+      app: plugin.app,
+      refresh: () => {
+        this.display();
+      },
+    });
   }
 
   override display(): void {
     const { containerEl } = this;
     containerEl.empty();
 
+    this.connections.render(containerEl);
     this.renderAttachmentSettings(containerEl);
     this.renderSafetySettings(containerEl);
     this.renderAdvancedSettings(containerEl);
