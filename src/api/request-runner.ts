@@ -1,4 +1,4 @@
-import { AppError, errorFromStatus } from '../util/errors';
+import { AppError, errorFromStatus, serverMessage } from '../util/errors';
 import type { Logger } from '../util/logger';
 import { err, ok, type Result } from '../util/result';
 import { parsePaged, type Parser } from './api-types';
@@ -289,7 +289,14 @@ export class RequestRunner {
       // the plugin from ever deleting either.
       const exhausted = attempt >= this.deps.retry.maxAttempts;
       if (exhausted || !isRetryableStatus(response.status)) {
-        return err(errorFromStatus(response.status, context));
+        // The body is already in hand, and for a refusal it is the only place the
+        // *reason* exists.
+        const detail = serverMessage(response.text);
+        return err(
+          detail === null
+            ? errorFromStatus(response.status, context)
+            : errorFromStatus(response.status, context, detail),
+        );
       }
 
       const retryAfter = parseRetryAfterMs(headerValue(response.headers, 'retry-after'));

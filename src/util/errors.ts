@@ -79,25 +79,62 @@ export function isAppError(value: unknown): value is AppError {
 }
 
 /**
+ * The explanation Confluence sent with a refusal.
+ *
+ * Its own `message` field says *why* — "No permission to create content in space TT",
+ * "XSRF check failed", "A page with this title already exists" — and without it a 403
+ * is indistinguishable from any other 403. That cost a live debugging round on the
+ * first attempt to create a page, so the server's own words are now carried through.
+ *
+ * Read defensively and truncated: this is a response body from an instance that may
+ * be behind a proxy returning HTML, so anything that is not a short JSON `message` is
+ * discarded rather than shown.
+ */
+export function serverMessage(body: string): string | null {
+  if (body.length === 0 || body.length > 8192) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+
+    const message = (parsed as { message?: unknown }).message;
+    if (typeof message !== 'string' || message.trim().length === 0) return null;
+
+    const trimmed = message.trim();
+    return trimmed.length > 300 ? `${trimmed.slice(0, 300)}…` : trimmed;
+  } catch {
+    return null;
+  }
+}
+
+/** Appends Confluence's own explanation, when it sent one. */
+function because(detail: string | undefined): string {
+  return detail === undefined || detail.length === 0 ? '' : ` Confluence said: ${detail}`;
+}
+
+/**
  * Maps an HTTP status to a typed error. `409` is deliberately mapped to
  * CONFLICT rather than a retryable failure (spec FR-5.5).
  */
-export function errorFromStatus(status: number, context: string): AppError {
+export function errorFromStatus(status: number, context: string, detail?: string): AppError {
   switch (status) {
     case 401:
       return new AppError(
         'AUTH_FAILED',
-        'Authentication failed — check your Personal Access Token.',
+        `Authentication failed — check your Personal Access Token.${because(detail)}`,
         { action: 'open-settings', status },
       );
     case 403:
       return new AppError(
         'PERMISSION_DENIED',
-        `Your Confluence account does not have permission for this action (${context}).`,
+        `Your Confluence account does not have permission for this action (${context}).` +
+          `${because(detail)}`,
         { status },
       );
     case 404:
-      return new AppError('NOT_FOUND', `Not found in Confluence (${context}).`, { status });
+      return new AppError('NOT_FOUND', `Not found in Confluence (${context}).${because(detail)}`, {
+        status,
+      });
     case 409:
       return new AppError(
         'CONFLICT',
@@ -116,18 +153,24 @@ export function errorFromStatus(status: number, context: string): AppError {
         },
       );
     default:
-      break;
+      return unmappedStatus(status, detail);
   }
+}
 
+/** Anything with no remedy of its own: a server fault is worth retrying, the rest is not. */
+function unmappedStatus(status: number, detail: string | undefined): AppError {
   if (status >= 500) {
-    return new AppError('UNKNOWN', `Confluence returned a server error (${String(status)}).`, {
-      action: 'retry',
-      status,
-    });
+    return new AppError(
+      'UNKNOWN',
+      `Confluence returned a server error (${String(status)}).${because(detail)}`,
+      { action: 'retry', status },
+    );
   }
-  return new AppError('UNKNOWN', `Unexpected response from Confluence (${String(status)}).`, {
-    status,
-  });
+  return new AppError(
+    'UNKNOWN',
+    `Unexpected response from Confluence (${String(status)}).${because(detail)}`,
+    { status },
+  );
 }
 
 /**

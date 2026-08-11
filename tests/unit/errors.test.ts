@@ -4,6 +4,7 @@ import {
   errorFromStatus,
   errorFromTransportFailure,
   isAppError,
+  serverMessage,
 } from '../../src/util/errors';
 
 describe('AppError', () => {
@@ -102,5 +103,48 @@ describe('errorFromTransportFailure', () => {
 
   it('mentions VPN, the usual on-premise cause', () => {
     expect(errorFromTransportFailure(new Error('ECONNREFUSED')).userMessage).toContain('VPN');
+  });
+});
+
+describe("Confluence's own explanation (§6.8)", () => {
+  it('carries the server message into a 403, which is the only place the reason lives', () => {
+    // A 403 on `POST /rest/api/content` is indistinguishable from any other 403
+    // without it: no space permission, a restricted parent page and a failed XSRF
+    // check all look the same.
+    const body = JSON.stringify({
+      statusCode: 403,
+      message: 'No permission to create content in space TT',
+    });
+
+    const error = errorFromStatus(403, '/rest/api/content', serverMessage(body) ?? undefined);
+
+    expect(error.code).toBe('PERMISSION_DENIED');
+    expect(error.userMessage).toContain('No permission to create content in space TT');
+  });
+
+  it('reads a message out of a Confluence error body', () => {
+    expect(serverMessage('{"message":"  A page with this title already exists  "}')).toBe(
+      'A page with this title already exists',
+    );
+  });
+
+  it('ignores anything that is not a short JSON message', () => {
+    // An instance behind an SSO portal answers with an HTML login page, and a
+    // proxy can answer with anything at all.
+    expect(serverMessage('<html><body>Login</body></html>')).toBeNull();
+    expect(serverMessage('{"statusCode":403}')).toBeNull();
+    expect(serverMessage('{"message":""}')).toBeNull();
+    expect(serverMessage('')).toBeNull();
+    expect(serverMessage(`{"message":"${'x'.repeat(9000)}"}`)).toBeNull();
+  });
+
+  it('truncates a message long enough to fill the notice', () => {
+    const long = serverMessage(`{"message":"${'y'.repeat(400)}"}`);
+    expect(long?.length).toBe(301);
+    expect(long?.endsWith('…')).toBe(true);
+  });
+
+  it('says nothing extra when Confluence sent no explanation', () => {
+    expect(errorFromStatus(403, '/rest/api/content').userMessage).not.toContain('Confluence said');
   });
 });
