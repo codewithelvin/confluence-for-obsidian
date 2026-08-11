@@ -3,6 +3,8 @@ import type { WorkspaceLeaf } from 'obsidian';
 import type { SettingsStore } from '../settings/settings-store';
 import type { Subscription } from '../settings/settings-types';
 import type { SyncController } from '../sync/sync-controller';
+import type { LocalPage } from '../sync/pull-planner';
+import { describeStructureOp } from '../sync/structure-planner';
 import type { SuspensionRegistry } from '../sync/suspension';
 import type { SyncReport } from '../sync/sync-types';
 
@@ -21,6 +23,14 @@ export interface SyncPanelDeps {
   readonly controller: SyncController;
   readonly suspensions: SuspensionRegistry;
   readonly startSync: (subscription: Subscription) => void;
+  /**
+   * FR-7.4's two answers to an orphan: write the note back, or delete the page.
+   *
+   * Both belong here rather than on a command, because an orphan has no note to run
+   * a command *on* — the panel is the only place it exists.
+   */
+  readonly restoreOrphan: (subscription: Subscription, page: LocalPage) => void;
+  readonly deleteOrphan: (subscription: Subscription, page: LocalPage) => void;
 }
 
 /**
@@ -66,6 +76,10 @@ function summaryOf(report: SyncReport): string {
   const pushed = report.conflictsResolved.filter((outcome) => outcome.choice === 'keep-local');
   if (pushed.length > 0) parts.push(`${String(pushed.length)} pushed`);
 
+  // Only when there were any: a zero on a space nobody comments on is a column of
+  // noise on every report forever.
+  if (report.commentsPulled > 0) parts.push(`${String(report.commentsPulled)} comments`);
+
   return parts.join(' · ');
 }
 
@@ -110,7 +124,90 @@ function renderConflicts(parent: HTMLElement, report: SyncReport): void {
   );
 }
 
-function renderReport(parent: HTMLElement, report: SyncReport): void {
+/** FR-7.4's two answers, bound to the subscription the report belongs to. */
+interface OrphanActions {
+  readonly restore: (page: LocalPage) => void;
+  readonly remove: (page: LocalPage) => void;
+}
+
+/**
+ * Orphans, each with the two things that can be done about it (FR-7.4).
+ *
+ * A row per orphan rather than a path list, because this is the one group in the panel
+ * the user cannot act on anywhere else: the note is gone, so there is no file to run a
+ * command against.
+ */
+function renderOrphans(
+  parent: HTMLElement,
+  orphans: readonly LocalPage[],
+  actions: OrphanActions,
+): void {
+  if (orphans.length === 0) return;
+
+  const group = parent.createDiv({ cls: 'confluence-panel-group' });
+  group.createDiv({
+    cls: 'confluence-panel-group-title',
+    text: `Orphans — note deleted, page still there (${String(orphans.length)})`,
+  });
+
+  for (const page of orphans.slice(0, LIST_LIMIT)) {
+    new Setting(group)
+      .setName(page.title)
+      .setDesc(page.path)
+      .addButton((button) =>
+        button.setButtonText('Restore note').onClick(() => {
+          actions.restore(page);
+        }),
+      )
+      .addButton((button) =>
+        button
+          .setButtonText('Delete page')
+          .setWarning()
+          .onClick(() => {
+            actions.remove(page);
+          }),
+      );
+  }
+
+  const hidden = orphans.length - LIST_LIMIT;
+  if (hidden > 0) {
+    group.createDiv({ cls: 'confluence-panel-more', text: `…and ${String(hidden)} more.` });
+  }
+}
+
+/**
+ * What the user's own rearranging produced (FR-7.4 to FR-7.8).
+ *
+ * Its own group of lists because the four states are genuinely different answers:
+ * applied, waiting to be confirmed, refused, and "this note is somewhere else".
+ */
+function renderStructure(parent: HTMLElement, report: SyncReport, orphans: OrphanActions): void {
+  renderOrphans(parent, report.orphans, orphans);
+  // Kept apart from the orphans above: this note is not gone, it is somewhere the
+  // plugin does not manage, and nothing about it should be offered for deletion (FR-7.7).
+  renderList(
+    parent,
+    'Moved out of the mount — not synced',
+    report.misplaced.map((page) => `${page.title} — now at ${page.foundAt}`),
+  );
+  renderList(
+    parent,
+    'Rearranged in Confluence to match your folders',
+    report.structural.map((op) => `${op.notePath} — ${describeStructureOp(op)}`),
+  );
+  renderList(
+    parent,
+    'Rearrangements waiting for your confirmation',
+    report.structuralDeclined.map((op) => `${op.notePath} — ${describeStructureOp(op)}`),
+  );
+  renderList(
+    parent,
+    'Rearrangements that cannot be applied',
+    report.structuralRejected.map((item) => `${item.path} — ${item.reason}`),
+  );
+}
+
+function renderReport(parent: HTMLElement, report: SyncReport, orphans: OrphanActions): void {
   parent.createDiv({ cls: 'confluence-panel-summary', text: summaryOf(report) });
 
   if (report.cancelled) {
@@ -128,11 +225,7 @@ function renderReport(parent: HTMLElement, report: SyncReport): void {
     'Read-only (could not round-trip)',
     report.degraded.map((page) => page.path),
   );
-  renderList(
-    parent,
-    'Orphans — note deleted, page still there',
-    report.orphans.map((p) => p.path),
-  );
+  renderStructure(parent, report, orphans);
   renderList(parent, 'Untracked files in the mount', [...report.untracked]);
   renderList(
     parent,
@@ -253,7 +346,16 @@ export class SyncPanelView extends ItemView {
       });
 
     const report = status.reports.get(subscription.id);
-    if (report !== undefined) renderReport(section, report);
+    if (report !== undefined) {
+      renderReport(section, report, {
+        restore: (page) => {
+          this.deps.restoreOrphan(subscription, page);
+        },
+        remove: (page) => {
+          this.deps.deleteOrphan(subscription, page);
+        },
+      });
+    }
   }
 
   private subtitle(subscription: Subscription, running: boolean): string {

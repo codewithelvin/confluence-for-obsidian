@@ -40,6 +40,74 @@ export interface RequestDeps {
   readonly pageSize: number;
 }
 
+/**
+ * A request body and the `Content-Type` that describes it.
+ *
+ * The two travel together because they are never independently correct: a JSON
+ * body sent as `multipart/form-data`, or multipart bytes sent as JSON, is a 400
+ * whose message says nothing about which half was wrong.
+ */
+export interface RequestBody {
+  readonly content: string | ArrayBuffer;
+  readonly contentType: string;
+}
+
+/**
+ * A file name that would break the part header.
+ *
+ * A quote or a line break inside `Content-Disposition` lets the name terminate the
+ * header and inject one of its own, so such a name is refused rather than escaped:
+ * Confluence attachment names do not legitimately contain either, and guessing at
+ * an encoding the server may not share would upload the file under a name no
+ * embed then matches.
+ */
+const UNSAFE_FILENAME = /["\r\n]/;
+
+/**
+ * Assembles a `multipart/form-data` body holding one file (spec FR-8.6).
+ *
+ * `minorEdit` is sent so uploading an image does not put a notification in every
+ * watcher's inbox — the user is publishing a page, not announcing a picture.
+ */
+export function multipartBody(
+  filename: string,
+  bytes: ArrayBuffer,
+  boundary: string,
+): Result<RequestBody, AppError> {
+  if (filename.length === 0 || UNSAFE_FILENAME.test(filename)) {
+    return err(
+      new AppError(
+        'VAULT_WRITE_FAILED',
+        `"${filename}" cannot be uploaded to Confluence: an attachment name may not contain ` +
+          'a quotation mark or a line break.',
+      ),
+    );
+  }
+
+  const encoder = new TextEncoder();
+  const head = encoder.encode(
+    `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+      'Content-Type: application/octet-stream\r\n\r\n',
+  );
+  const tail = encoder.encode(
+    `\r\n--${boundary}\r\n` +
+      'Content-Disposition: form-data; name="minorEdit"\r\n\r\n' +
+      `true\r\n--${boundary}--\r\n`,
+  );
+
+  const file = new Uint8Array(bytes);
+  const content = new Uint8Array(head.length + file.length + tail.length);
+  content.set(head, 0);
+  content.set(file, head.length);
+  content.set(tail, head.length + file.length);
+
+  return ok({
+    content: content.buffer,
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  });
+}
+
 export class RequestRunner {
   constructor(
     private readonly baseUrl: string,
@@ -55,7 +123,7 @@ export class RequestRunner {
     path: string,
     query: QueryParams,
     method: HttpMethod = 'GET',
-    body?: string,
+    body?: RequestBody,
   ): Promise<Result<HttpResponse, AppError>> {
     const token = this.getToken();
     if (token === null) {
@@ -90,10 +158,63 @@ export class RequestRunner {
     payload: unknown,
     parse: Parser<T>,
   ): Promise<Result<T, AppError>> {
-    const response = await this.send(path, {}, method, JSON.stringify(payload));
+    const response = await this.send(path, {}, method, {
+      content: JSON.stringify(payload),
+      contentType: 'application/json',
+    });
     if (!response.ok) return response;
 
     return this.decode(response.value, parse);
+  }
+
+  /**
+   * A request with no response body worth reading — a label removal (FR-9.2).
+   *
+   * Confluence answers `DELETE .../label` with 204 and an empty body, so decoding
+   * it as JSON would fail on a request that succeeded.
+   */
+  async empty(
+    path: string,
+    query: QueryParams,
+    method: HttpMethod,
+  ): Promise<Result<void, AppError>> {
+    const response = await this.send(path, query, method);
+    return response.ok ? ok(undefined) : response;
+  }
+
+  /**
+   * Uploads one file as `multipart/form-data` (spec FR-8.6).
+   *
+   * The body is assembled by hand as bytes. `FormData` cannot be used: it is only
+   * meaningful to `fetch`, and §6.1 requires every request to go through
+   * `requestUrl`, which takes a string or an `ArrayBuffer`. Encoding the file part
+   * as a string is not an option either — a PNG that has been through a JavaScript
+   * string is a corrupt PNG.
+   */
+  async upload<T>(
+    path: string,
+    filename: string,
+    bytes: ArrayBuffer,
+    parse: Parser<T>,
+  ): Promise<Result<T, AppError>> {
+    const body = multipartBody(filename, bytes, this.boundary());
+    if (!body.ok) return body;
+
+    const response = await this.send(path, {}, 'POST', body.value);
+    if (!response.ok) return response;
+
+    return this.decode(response.value, parse);
+  }
+
+  /**
+   * A part boundary that will not occur in the payload.
+   *
+   * Drawn from the injected scheduler rather than `Math.random` so a test sees a
+   * fixed boundary and can assert on the assembled body (§7.5).
+   */
+  private boundary(): string {
+    const noise = Math.floor(this.deps.scheduler.random() * 0xffffffff).toString(16);
+    return `----confluence-dc-connector-${noise.padStart(8, '0')}`;
   }
 
   private decode<T>(response: HttpResponse, parse: Parser<T>): Result<T, AppError> {
@@ -132,13 +253,13 @@ export class RequestRunner {
     method: HttpMethod,
     token: string,
     context: string,
-    body?: string,
+    body?: RequestBody,
   ): Promise<Result<HttpResponse, AppError>> {
     const headers = {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json, application/xml;q=0.9, */*;q=0.8',
       'X-Atlassian-Token': 'no-check',
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(body === undefined ? {} : { 'Content-Type': body.contentType }),
     };
 
     let attempt = 0;
@@ -148,7 +269,7 @@ export class RequestRunner {
         url,
         method,
         headers,
-        ...(body === undefined ? {} : { body }),
+        ...(body === undefined ? {} : { body: body.content }),
       });
 
       // A transport failure is DNS, refusal or TLS — retrying cannot help.
@@ -162,7 +283,10 @@ export class RequestRunner {
       // Retrying a bodied request is safe because a page update carries the
       // version it expects (FR-5.4): if the first attempt actually landed, the
       // retry comes back 409 and routes to the conflict flow rather than
-      // overwriting anything (FR-5.5).
+      // overwriting anything (FR-5.5). An attachment upload has no such guard,
+      // but it needs none: a second `POST` of the same file name creates a new
+      // *version* of that attachment rather than a duplicate, and FR-8.7 keeps
+      // the plugin from ever deleting either.
       const exhausted = attempt >= this.deps.retry.maxAttempts;
       if (exhausted || !isRetryableStatus(response.status)) {
         return err(errorFromStatus(response.status, context));

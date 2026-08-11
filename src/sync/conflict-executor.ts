@@ -128,6 +128,7 @@ async function keepRemote(
     path: state.localPath,
     isFolderNote: state.isFolderNote,
     alias: state.alias,
+    labels: state.labels,
   });
 
   return pulled.ok

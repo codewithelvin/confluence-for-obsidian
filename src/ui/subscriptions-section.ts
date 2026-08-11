@@ -87,6 +87,39 @@ export class SubscriptionsSection {
             this.confirmRemoval(subscription);
           }),
       );
+
+    // FR-9.5's per-subscription switch. Its own row rather than a control on the
+    // one above, because the description is where FR-9.4's warning belongs: this is
+    // the screen where somebody decides to have a region they may then type into.
+    new Setting(containerEl)
+      .setName('Sync comments')
+      .setDesc(
+        'Pull footer and inline comments into a block at the end of each note. ' +
+          'The block is rebuilt on every sync, so anything typed inside it is lost. ' +
+          'Add `confluenceComments: false` to one note to leave that note without it.',
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(subscription.syncComments).onChange((value) => {
+          void this.setComments(subscription, value);
+        }),
+      );
+  }
+
+  /**
+   * Turning comments off does not remove the regions already written.
+   *
+   * They go on the next sync of the page, which is the only write that may touch a
+   * note's body: rewriting hundreds of notes from a settings toggle would be a mass
+   * edit nobody asked for, and one the user could not undo.
+   */
+  private async setComments(subscription: Subscription, syncComments: boolean): Promise<void> {
+    const { subscriptions } = this.deps.store.get();
+
+    await this.deps.store.update({
+      subscriptions: subscriptions.map((candidate) =>
+        candidate.id === subscription.id ? { ...candidate, syncComments } : candidate,
+      ),
+    });
   }
 
   private confirmRemoval(subscription: Subscription): void {

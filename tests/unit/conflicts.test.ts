@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { attachmentHook } from '../../src/sync/attachment-executor';
 import { BackupStore, backupName, backupTakenAt } from '../../src/sync/backup-store';
+import { commentHook } from '../../src/sync/comments-executor';
 import {
   resolveConflict,
   type ConflictChoice,
@@ -48,6 +49,7 @@ function pageState(extra: Partial<PageState> = {}): PageState {
     storageHash: 'storage',
     fidelity: 'certified',
     lastSyncedAt: '2026-08-10T12:00:00Z',
+    labels: [],
     ...extra,
   };
 }
@@ -88,6 +90,7 @@ beforeEach(async () => {
         { client, vault, logger, mountPath: 'ENG', sizeLimitBytes: 1e9, referencedOnly: true },
         () => ({}),
       ),
+      comments: commentHook({ client, vault, logger, enabled: true }),
     },
     backups: new BackupStore({
       state: stateGateway,

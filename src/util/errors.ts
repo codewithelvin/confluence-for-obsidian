@@ -22,6 +22,14 @@ export type ErrorCode =
   // real and must be reported per page rather than collapsed into UNKNOWN, so
   // the sync report can name the file that failed.
   | 'VAULT_WRITE_FAILED'
+  // Also outside the §6.8 table, and deliberately not something a push fails on:
+  // FR-9.2 requires a tag Confluence cannot hold as a label to be *reported* rather
+  // than dropped, and reporting it needs a code to report it under.
+  | 'LABEL_UNSUPPORTED'
+  // An embed the push cannot carry to Confluence as written (FR-8.6). Its own code
+  // because the remedy is specific and the user can apply it: write the embed as the
+  // full vault path.
+  | 'EMBED_UNSUPPORTED'
   | 'RATE_LIMITED'
   | 'PERMISSION_DENIED'
   | 'NOT_FOUND'

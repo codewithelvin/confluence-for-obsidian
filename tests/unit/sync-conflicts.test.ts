@@ -271,6 +271,7 @@ describe('what the index ends up holding (§6.6.2 step 7)', () => {
     storageHash: 's',
     fidelity: 'certified' as const,
     lastSyncedAt: '2026-08-01T00:00:00Z',
+    labels: [],
   };
 
   it('patches a relocated page rather than replacing its record', () => {

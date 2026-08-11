@@ -1,7 +1,7 @@
 import type { PhrasingContent, RootContent, Table, TableCell, TableRow } from 'mdast';
 import { makeBlockPlaceholder } from './placeholder-factory';
 import { acAttr, childrenOf, hasNamespacedMarkup, tagOf } from './storage-parser';
-import { FAITHFUL, serialiseElement } from './storage-serialiser';
+import { FAITHFUL, serialiseElement, WHITESPACE_PRESERVING } from './storage-serialiser';
 import type { ConversionContext } from './types';
 
 /**
@@ -225,30 +225,73 @@ const COMMENT_ANCHOR_CLOSE = 'cf-comment-end';
 const SAFE_REF = /^[A-Za-z0-9-]+$/;
 
 /**
- * A copy of the table with every inline-comment anchor turned into a comment
- * pair, or `null` when one of them cannot be carried that way.
+ * Turns every inline-comment anchor in a *copy* of the table into a comment pair.
  *
- * A copy rather than the table itself: the original still has to be serialisable
- * verbatim into a fragment if the projection is refused further down.
+ * Mutates, and returns `false` when one of them cannot be carried that way — the
+ * caller then keeps the table preserved, and the original is still intact to be
+ * serialised verbatim into a fragment.
  */
-function hideCommentAnchors(table: Element): Element | null {
-  if (table.getElementsByTagName(INLINE_COMMENT_MARKER).length === 0) return table;
-
-  const clone = table.cloneNode(true) as Element;
+function hideCommentAnchorsIn(clone: Element): boolean {
   const document = clone.ownerDocument;
 
   for (const marker of Array.from(clone.getElementsByTagName(INLINE_COMMENT_MARKER))) {
     const ref = acAttr(marker, 'ref');
     const parent = marker.parentNode;
-    if (parent === null) return null;
-    if (marker.attributes.length !== 1 || ref === null || !SAFE_REF.test(ref)) return null;
+    if (parent === null) return false;
+    if (marker.attributes.length !== 1 || ref === null || !SAFE_REF.test(ref)) return false;
 
     parent.insertBefore(document.createComment(`${COMMENT_ANCHOR_OPEN}${ref}`), marker);
     while (marker.firstChild !== null) parent.insertBefore(marker.firstChild, marker);
     parent.insertBefore(document.createComment(COMMENT_ANCHOR_CLOSE), marker);
     parent.removeChild(marker);
   }
-  return clone;
+  return true;
+}
+
+/** A blank line: a newline followed by another, with only spaces or tabs between. */
+const BLANK_LINE = /\n[ \t]*(?:\n[ \t]*)+/g;
+
+function hasBlankLine(text: string): boolean {
+  return /\n[ \t]*\n/.test(text);
+}
+
+/**
+ * Removes blank lines from a copy of the table, so it survives as one HTML block.
+ *
+ * A CommonMark HTML block **ends at a blank line**. A table written into the note
+ * with one inside a cell is therefore cut in two: the remainder re-parses as
+ * paragraphs, and the reproduced body loses the whitespace that separated them.
+ * Measured on space EP, this is the single largest cause of an unpushable page —
+ * 56% of the 592 notes holding an HTML table were read-only, against 6.6% of
+ * notes without one.
+ *
+ * Rewriting the whitespace is free in certification terms because `CANONICAL`
+ * collapses runs of whitespace on *both* sides of the comparison (§6.4.5): the
+ * original's blank line and this single newline both become one space.
+ *
+ * Returns `false` when the blank line sits somewhere its whitespace is content —
+ * inside a `<pre>` or a `<code>`. There the table cannot be an HTML block at all,
+ * and an honest placeholder is the only correct answer.
+ */
+function removeBlankLines(node: Node, preserving: boolean): boolean {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.nodeValue ?? '';
+    if (!hasBlankLine(text)) return true;
+    if (preserving) return false;
+
+    node.nodeValue = text.replace(BLANK_LINE, '\n');
+    return true;
+  }
+
+  // A comment cannot be rewritten — its text is carried verbatim to Confluence —
+  // so one holding a blank line refuses the projection instead.
+  if (node.nodeType === Node.COMMENT_NODE) return !hasBlankLine(node.nodeValue ?? '');
+
+  const inside =
+    preserving ||
+    (node.nodeType === Node.ELEMENT_NODE && WHITESPACE_PRESERVING.has(tagOf(node as Element)));
+
+  return childrenOf(node).every((child) => removeBlankLines(child, inside));
 }
 
 /**
@@ -284,23 +327,54 @@ export function restoreCommentAnchors(html: string): string {
  * An inline comment's anchor is the exception — it wraps ordinary text and can
  * travel as an HTML comment instead, so it is not what makes a table opaque.
  */
-function tableAsHtml(table: Element): RootContent | null {
-  if (isIndented(table)) return null;
+/**
+ * Either the table as an HTML node, or why it has to stay preserved.
+ *
+ * The reason is carried out rather than discarded because it becomes the
+ * placeholder's label, and a label describing the wrong thing is its own bug: a
+ * table refused over an unsplittable code block should not tell the reader it
+ * contains macros.
+ */
+type Projection = { readonly node: RootContent } | { readonly reason: string };
 
-  const projected = hideCommentAnchors(table);
-  if (projected === null || hasNamespacedMarkup(projected)) return null;
+/** Content Obsidian renders as nothing, so writing the table out would show gaps. */
+const NAMESPACED = 'table containing Confluence macros, images or links';
 
-  return { type: 'html', value: serialiseElement(projected, FAITHFUL) };
+/** A blank line the projection may not remove, so the table cannot be one block. */
+const UNSPLITTABLE = 'table containing preformatted text broken by a blank line';
+
+function tableAsHtml(table: Element): Projection {
+  const projected = table.cloneNode(true) as Element;
+  if (!hideCommentAnchorsIn(projected)) return { reason: NAMESPACED };
+  if (hasNamespacedMarkup(projected)) return { reason: NAMESPACED };
+  if (!removeBlankLines(projected, false)) return { reason: UNSPLITTABLE };
+
+  const html = serialiseElement(projected, FAITHFUL);
+  // Last line of defence. Everything above works on the DOM, but an attribute
+  // value can hold a newline too, and one blank line anywhere in the serialised
+  // markup silently truncates the block.
+  if (hasBlankLine(html)) return { reason: UNSPLITTABLE };
+
+  return { node: { type: 'html', value: isIndented(table) ? `${html}\n` : html } };
 }
 
 /**
- * Containers that indent their content in Markdown, where a raw HTML block stops
- * being reliable.
+ * Containers that indent their content in Markdown.
  *
- * A list item or a quote writes its content behind `- ` or `> `, and an HTML block
- * inside that runs until a blank line — so the lines *after* the table get
- * swallowed into it and the body no longer reproduces. A placeholder there is
- * honest; a table that eats the paragraph following it is not.
+ * A list item or a quote writes its content behind `- ` or `> `, and Markdown puts
+ * only a single newline between two blocks inside one — which does **not** end an
+ * HTML block. Whatever follows the table is then swallowed into it: a paragraph
+ * survives by luck, because §6.4.6 already claims bare text in a list item
+ * equivalent to a wrapped `<p>`, but a nested list is reproduced as the literal
+ * text `- sub` and the sub-list is gone.
+ *
+ * So an indented table carries a trailing newline, which makes the following line
+ * blank and closes the block properly. That recovers **953** preserved tables in
+ * the mirror, every one of which was opaque purely because of where it sat.
+ *
+ * Top-level tables do not get it: Markdown already separates top-level blocks by a
+ * blank line, and adding another would put a visible gap under every table on the
+ * 4 733 pages where the projection already worked.
  */
 const INDENTING_ANCESTORS = new Set(['li', 'blockquote']);
 
@@ -315,15 +389,15 @@ function isIndented(element: Element): boolean {
 export function convertTable(table: Element, ctx: ConversionContext): RootContent {
   const analysed = analyseTable(table);
   if (analysed === null) {
-    // GFM cannot hold it, but HTML can — and a visible table beats a labelled
-    // widget hiding what is often the whole point of the page.
-    return (
-      tableAsHtml(table) ??
-      makeBlockPlaceholder(ctx.placeholders, table, {
-        type: 'table',
-        label: 'table containing Confluence macros, images or links',
-      })
-    );
+    // GFM cannot hold it, but HTML usually can — and a visible table beats a
+    // labelled widget hiding what is often the whole point of the page.
+    const projected = tableAsHtml(table);
+    return 'node' in projected
+      ? projected.node
+      : makeBlockPlaceholder(ctx.placeholders, table, {
+          type: 'table',
+          label: projected.reason,
+        });
   }
 
   const rows: TableRow[] = analysed.rows.map((cells) => ({

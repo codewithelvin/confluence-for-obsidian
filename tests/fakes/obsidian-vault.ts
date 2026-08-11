@@ -202,6 +202,7 @@ export class Vault {
   private readonly files = new Map<string, TFile>();
   private readonly folders = new Map<string, TFolder>();
   private readonly contents = new Map<string, string>();
+  private readonly binaries = new Map<string, Uint8Array>();
 
   getFileByPath(path: string): TFile | null {
     return this.files.get(path) ?? null;
@@ -217,6 +218,35 @@ export class Vault {
 
   read(file: TFile): Promise<string> {
     return Promise.resolve(this.contents.get(file.path) ?? '');
+  }
+
+  readBinary(file: TFile): Promise<ArrayBuffer> {
+    const bytes = this.binaries.get(file.path) ?? new Uint8Array();
+    const buffer = new ArrayBuffer(bytes.length);
+    new Uint8Array(buffer).set(bytes);
+    return Promise.resolve(buffer);
+  }
+
+  createBinary(path: string, data: ArrayBuffer): Promise<TFile> {
+    const file = new TFile(path);
+    this.files.set(path, file);
+    this.binaries.set(path, new Uint8Array(data));
+    this.link(file);
+    return Promise.resolve(file);
+  }
+
+  modifyBinary(file: TFile, data: ArrayBuffer): Promise<void> {
+    this.binaries.set(file.path, new Uint8Array(data));
+    return Promise.resolve();
+  }
+
+  /** Test helper: seeds a binary the way a completed attachment download leaves one. */
+  seedBinary(path: string, bytes: Uint8Array): TFile {
+    const file = new TFile(path);
+    this.files.set(path, file);
+    this.binaries.set(path, bytes);
+    this.link(file);
+    return file;
   }
 
   create(path: string, data: string): Promise<TFile> {
@@ -248,6 +278,11 @@ export class Vault {
   /** Test helper: every path currently in the vault. */
   allPaths(): string[] {
     return [...this.files.keys(), ...this.folders.keys()].sort();
+  }
+
+  /** Every file, for the metadata cache's link resolution. */
+  allFiles(): TFile[] {
+    return [...this.files.values()];
   }
 
   remove(file: TAbstractFile): void {
@@ -320,5 +355,17 @@ export class MetadataCache {
     const content = this.vault.contentOf(file.path);
     if (content === undefined) return null;
     return { frontmatter: parseFrontmatter(splitBlock(content).yaml) };
+  }
+
+  /**
+   * Obsidian's link resolution, reduced to the two cases the plugin relies on: a
+   * full vault path, which is what the converter writes (FR-8.2), and a bare file
+   * name, which is what a user typing an embed writes.
+   */
+  getFirstLinkpathDest(linkpath: string, _sourcePath: string): TFile | null {
+    const exact = this.vault.getFileByPath(linkpath);
+    if (exact !== null) return exact;
+
+    return this.vault.allFiles().find((file) => file.name === linkpath.split('/').pop()) ?? null;
   }
 }

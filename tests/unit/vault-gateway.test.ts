@@ -74,6 +74,8 @@ describe('writeNote', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
 
     expect(result.ok).toBe(true);
@@ -88,6 +90,8 @@ describe('writeNote', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
     const written = contentAt('Confluence/a.md');
 
@@ -107,6 +111,8 @@ describe('writeNote', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
 
     expect(result.ok && result.value).toBe(contentAt('Confluence/a.md'));
@@ -119,6 +125,8 @@ describe('writeNote', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
     const file = app.vault.getFileByPath('Confluence/a.md');
     if (file === null) throw new Error('note was not created');
@@ -132,6 +140,8 @@ describe('writeNote', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
     const written = contentAt('Confluence/a.md');
 
@@ -147,6 +157,8 @@ describe('writeNote', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
     await gateway.writeNote({
       path: 'Confluence/a.md',
@@ -154,6 +166,8 @@ describe('writeNote', () => {
       identity: { ...IDENTITY, version: 9, fidelity: 'degraded' },
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
 
     const written = contentAt('Confluence/a.md');
@@ -169,6 +183,8 @@ describe('writeNote', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
 
     expect(result.ok).toBe(false);
@@ -186,6 +202,8 @@ describe('writeNote', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
 
     expect(!result.ok && result.error.code).toBe('VAULT_WRITE_FAILED');
@@ -201,6 +219,8 @@ describe('scan', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
     await app.vault.create('Confluence/untracked.md', 'just a note\n');
 
@@ -255,6 +275,8 @@ describe('move', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
 
     const result = await gateway.move('Confluence/a.md', 'Confluence/ENG/Deep/a.md');
@@ -272,6 +294,8 @@ describe('move', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
     await gateway.writeNote({
       path: 'Confluence/Old/Child.md',
@@ -279,6 +303,8 @@ describe('move', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
 
     const result = await gateway.move('Confluence/Old', 'Confluence/New');
@@ -294,6 +320,8 @@ describe('move', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
     const result = await gateway.move('Confluence/a.md', 'Personal/a.md');
 
@@ -312,6 +340,8 @@ describe('move', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
     Object.defineProperty(app.fileManager, 'renameFile', {
       value: () => Promise.reject(new Error('in use')),
@@ -330,6 +360,8 @@ describe('trash and removeEmptyFolder', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
 
     expect((await gateway.trash('Confluence/a.md')).ok).toBe(true);
@@ -352,6 +384,8 @@ describe('trash and removeEmptyFolder', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
     Object.defineProperty(app.fileManager, 'trashFile', {
       value: () => Promise.reject(new Error('denied')),
@@ -369,6 +403,8 @@ describe('trash and removeEmptyFolder', () => {
       identity: IDENTITY,
       alias: null,
       previousAlias: null,
+      tags: [],
+      previousTags: [],
     });
 
     expect((await gateway.removeEmptyFolder('Confluence/Keep')).ok).toBe(true);
@@ -484,5 +520,90 @@ describe('ObsidianStateGateway', () => {
 
     const result = await state.read('index.json');
     expect(!result.ok && result.error.code).toBe('VAULT_WRITE_FAILED');
+  });
+});
+
+describe('tags, the comments opt-out and embeds (FR-9.1, FR-9.6, FR-8.6)', () => {
+  async function seedNote(path: string, frontmatter: string, body = 'text'): Promise<void> {
+    await app.vault.createFolder('Confluence');
+    await app.vault.create(path, `---\n${frontmatter}\n---\n${body}\n`);
+  }
+
+  it('merges the page’s labels into tags and leaves the user’s own alone', async () => {
+    await seedNote('Confluence/a.md', 'tags:\n  - mine');
+
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'text',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+      tags: ['api'],
+      previousTags: [],
+    });
+
+    expect(gateway.readTags('Confluence/a.md')).toEqual(['mine', 'api']);
+  });
+
+  it('removes only the label it wrote last time', async () => {
+    await seedNote('Confluence/a.md', 'tags:\n  - mine\n  - api\n  - gone');
+
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'text',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+      tags: ['api'],
+      previousTags: ['api', 'gone'],
+    });
+
+    expect(gateway.readTags('Confluence/a.md')).toEqual(['mine', 'api']);
+  });
+
+  it('reads no tags from a note that has none, or from a path that is not a note', () => {
+    expect(gateway.readTags('Confluence/missing.md')).toEqual([]);
+  });
+
+  it('recognises a note that has opted out of the comments region', async () => {
+    await seedNote('Confluence/a.md', 'confluenceComments: false');
+    await seedNote('Confluence/b.md', 'tags:\n  - mine');
+
+    expect(gateway.commentsDisabled('Confluence/a.md')).toBe(true);
+    expect(gateway.commentsDisabled('Confluence/b.md')).toBe(false);
+    expect(gateway.commentsDisabled('Confluence/missing.md')).toBe(false);
+  });
+
+  it('resolves an embed by full path and by bare file name', async () => {
+    await app.vault.createFolder('Confluence');
+    app.vault.seedBinary('Confluence/_attachments/1/diagram.png', new Uint8Array([1, 2]));
+
+    expect(gateway.resolveEmbed('Confluence/_attachments/1/diagram.png', 'Confluence/a.md')).toBe(
+      'Confluence/_attachments/1/diagram.png',
+    );
+    // What a user typing an embed writes, which Obsidian resolves vault-wide.
+    expect(gateway.resolveEmbed('diagram.png', 'Confluence/a.md')).toBe(
+      'Confluence/_attachments/1/diagram.png',
+    );
+    expect(gateway.resolveEmbed('nothing.png', 'Confluence/a.md')).toBeNull();
+  });
+
+  it('reads a file’s bytes, and reports a path that holds none', async () => {
+    app.vault.seedBinary('Confluence/_attachments/1/diagram.png', new Uint8Array([9, 8, 7]));
+
+    const bytes = await gateway.readBinary('Confluence/_attachments/1/diagram.png');
+    expect(bytes.ok && [...new Uint8Array(bytes.value)]).toEqual([9, 8, 7]);
+
+    const missing = await gateway.readBinary('Confluence/nothing.png');
+    expect(!missing.ok && missing.error.code).toBe('NOT_FOUND');
+  });
+
+  it('reads a file outside the mount, which an embed may legitimately point at', async () => {
+    // §6.3 bounds where the plugin *writes*. Refusing to read the user's own
+    // attachments folder would publish a page whose picture is missing (FR-8.6).
+    app.vault.seedBinary('Personal/attachments/photo.png', new Uint8Array([4]));
+
+    const bytes = await gateway.readBinary('Personal/attachments/photo.png');
+    expect(bytes.ok).toBe(true);
   });
 });

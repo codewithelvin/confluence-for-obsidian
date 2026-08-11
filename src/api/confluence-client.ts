@@ -2,14 +2,17 @@ import type { AppError } from '../util/errors';
 import { ok, type Result } from '../util/result';
 import { meetsMinimumVersion, type SemanticVersion } from '../util/version';
 import {
+  parseComment,
   parsePage,
   parsePageRef,
   parsePaged,
   parseAttachment,
   parseSpace,
   parseUpdatedPage,
+  parseUploadedAttachment,
   parseUser,
   type ConfluenceAttachment,
+  type ConfluenceComment,
   type ConfluencePage,
   type ConfluencePageRef,
   type ConfluencePageVersion,
@@ -59,6 +62,21 @@ export interface PageUpdate {
 }
 
 /**
+ * A page being created (spec FR-7.1).
+ *
+ * No version: Confluence assigns 1. `parentId` is `null` only for a page that
+ * belongs at the top of the space, which is why it is stated explicitly rather
+ * than omitted — an accidental `undefined` would create the page at the space
+ * root, several levels away from where the user asked for it.
+ */
+export interface PageCreation {
+  readonly title: string;
+  readonly spaceKey: string;
+  readonly parentId: string | null;
+  readonly storage: string;
+}
+
+/**
  * The narrow view of the gateway that sync depends on (spec §6.1).
  *
  * Declared as an interface so the sync engine can be exercised end to end
@@ -80,7 +98,17 @@ export interface ConfluenceGateway {
   getPage(id: string): Promise<Result<ConfluencePage, AppError>>;
   listAttachments(pageId: string): Promise<Result<ConfluenceAttachment[], AppError>>;
   downloadAttachment(downloadPath: string): Promise<Result<ArrayBuffer, AppError>>;
+  uploadAttachment(
+    pageId: string,
+    filename: string,
+    bytes: ArrayBuffer,
+  ): Promise<Result<ConfluenceAttachment, AppError>>;
+  listComments(pageId: string): Promise<Result<ConfluenceComment[], AppError>>;
+  addLabels(pageId: string, labels: readonly string[]): Promise<Result<void, AppError>>;
+  removeLabel(pageId: string, label: string): Promise<Result<void, AppError>>;
   updatePage(update: PageUpdate): Promise<Result<ConfluencePageVersion, AppError>>;
+  createPage(creation: PageCreation): Promise<Result<ConfluencePageVersion, AppError>>;
+  deletePage(pageId: string): Promise<Result<void, AppError>>;
 }
 
 /**
@@ -171,6 +199,75 @@ export class ConfluenceClient implements ConfluenceGateway {
     return response.ok ? ok(response.value.bytes) : response;
   }
 
+  /**
+   * Uploads a file the note embeds but the page does not have (spec FR-8.6).
+   *
+   * A name that already exists on the page becomes a new *version* of that
+   * attachment rather than a second file — which is Confluence's behaviour, not a
+   * choice made here, and why the push path checks first that the name it is about
+   * to use belongs to the file it means.
+   */
+  async uploadAttachment(
+    pageId: string,
+    filename: string,
+    bytes: ArrayBuffer,
+  ): Promise<Result<ConfluenceAttachment, AppError>> {
+    return this.runner.upload(
+      ENDPOINTS.attachments(pageId),
+      filename,
+      bytes,
+      parseUploadedAttachment,
+    );
+  }
+
+  /**
+   * Every comment on a page, replies included (spec FR-9.3).
+   *
+   * `depth=all` flattens the reply threads into the collection. Without it the
+   * endpoint returns only top-level comments, and a discussion where the answer is
+   * a reply would show the question and not the answer.
+   */
+  async listComments(pageId: string): Promise<Result<ConfluenceComment[], AppError>> {
+    return this.runner.collect(
+      ENDPOINTS.comments(pageId),
+      {
+        depth: 'all',
+        expand: 'body.storage,history,version,extensions.inlineProperties',
+      },
+      parseComment,
+    );
+  }
+
+  /**
+   * Adds labels to a page (spec FR-9.2).
+   *
+   * One request for the whole set: the endpoint takes an array, and a request per
+   * label would multiply the cost of a batch push by however many tags the user
+   * happens to keep.
+   */
+  async addLabels(pageId: string, labels: readonly string[]): Promise<Result<void, AppError>> {
+    if (labels.length === 0) return ok(undefined);
+
+    return this.runner.jsonBody(
+      ENDPOINTS.labels(pageId),
+      'POST',
+      labels.map((name) => ({ prefix: 'global', name })),
+      // The response echoes the page's whole label list, which the caller already
+      // knows; only the status matters.
+      () => ok(undefined),
+    );
+  }
+
+  /**
+   * Removes one label (spec FR-9.2).
+   *
+   * Singular because the endpoint is: removal takes the name as a query parameter,
+   * so a set has to be a request each.
+   */
+  async removeLabel(pageId: string, label: string): Promise<Result<void, AppError>> {
+    return this.runner.empty(ENDPOINTS.labels(pageId), { name: label }, 'DELETE');
+  }
+
   /** Lists spaces, following pagination to completion (spec FR-2.1). */
   async listSpaces(
     options: { includePersonal?: boolean } = {},
@@ -253,12 +350,14 @@ export class ConfluenceClient implements ConfluenceGateway {
    *
    * `body.storage` is requested explicitly: without it Confluence returns a
    * page with no body, which would convert to an empty note and, on a later
-   * push, blank the page.
+   * push, blank the page. `metadata.labels` rides along on the same request
+   * (FR-9.1) — the labels are needed for every page whose body is fetched, and
+   * asking separately would double the request count of a full pull.
    */
   async getPage(id: string): Promise<Result<ConfluencePage, AppError>> {
     return this.runner.json(
       ENDPOINTS.contentById(id),
-      { expand: `body.storage,${REF_EXPANSIONS}` },
+      { expand: `body.storage,metadata.labels,${REF_EXPANSIONS}` },
       parsePage,
     );
   }
@@ -286,5 +385,39 @@ export class ConfluenceClient implements ConfluenceGateway {
       },
       parseUpdatedPage,
     );
+  }
+
+  /**
+   * Creates a page (spec FR-7.1).
+   *
+   * `ancestors` is how a parent is stated on creation; omitting it puts the page at
+   * the top of the space, which is never what the user chose. A page with no parent
+   * is therefore an explicit decision here, not an accident of an absent field.
+   */
+  async createPage(creation: PageCreation): Promise<Result<ConfluencePageVersion, AppError>> {
+    return this.runner.jsonBody(
+      ENDPOINTS.content,
+      'POST',
+      {
+        type: 'page',
+        title: creation.title,
+        space: { key: creation.spaceKey },
+        ...(creation.parentId === null ? {} : { ancestors: [{ id: creation.parentId }] }),
+        body: { storage: { value: creation.storage, representation: 'storage' } },
+      },
+      parseUpdatedPage,
+    );
+  }
+
+  /**
+   * Moves a page to the Confluence trash (spec FR-7.3).
+   *
+   * A trash, not a purge: `DELETE` on content puts the page in the space's trash,
+   * where an administrator can restore it. That is the only reason this operation is
+   * offered at all — D6 keeps it out of every automatic path, and FR-7.3 puts a
+   * typed confirmation in front of the one command that reaches it.
+   */
+  async deletePage(pageId: string): Promise<Result<void, AppError>> {
+    return this.runner.empty(ENDPOINTS.contentById(pageId), {}, 'DELETE');
   }
 }

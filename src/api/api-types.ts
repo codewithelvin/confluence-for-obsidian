@@ -76,6 +76,42 @@ export interface ConfluencePageRef extends ConfluencePageSummary {
 export interface ConfluencePage extends ConfluencePageRef {
   /** The `body.storage` value — the format everything else is derived from. */
   readonly storage: string;
+  /**
+   * Label names, without their namespace prefix (spec FR-9.1).
+   *
+   * Present only when the request asked for `expand=metadata.labels`. An empty
+   * list therefore means "none expanded" as well as "none set" — which is safe
+   * in both directions here, because FR-9.2 diffs against what the plugin last
+   * recorded rather than against this value.
+   */
+  readonly labels: readonly string[];
+}
+
+/** Where a comment is anchored (spec FR-9.3). */
+export type CommentLocation = 'footer' | 'inline';
+
+/**
+ * One comment on a page, as `child/comment` reports it.
+ *
+ * The body arrives as storage format and is reduced to plain text for the managed
+ * region — the region is read-only and never pushed (FR-5.8), so nothing in it
+ * has to survive a round trip.
+ */
+export interface ConfluenceComment {
+  readonly id: string;
+  readonly author: string;
+  /** ISO-8601 creation time, or `''` when the instance did not report one. */
+  readonly createdAt: string;
+  readonly storage: string;
+  readonly location: CommentLocation;
+  /**
+   * The inline marker this comment is attached to, or `null` for a footer comment.
+   *
+   * Matches the `ref` of the `<!--cf-comment:REF-->` carrier the converter leaves
+   * in the body (§6.4), which is what lets a reader tie a remark to the sentence
+   * it is about instead of to the page as a whole.
+   */
+  readonly inlineRef: string | null;
 }
 
 /** An attachment on a page, as the `child/attachment` endpoint reports it. */
@@ -211,7 +247,55 @@ export const parsePage: Parser<ConfluencePage> = (raw) => {
   const storage = asString(readPath(raw, 'body', 'storage', 'value'));
   if (id === null || storage === null) return err(malformed('a page body'));
 
-  return ok({ ...readRef(raw, id), storage });
+  return ok({ ...readRef(raw, id), storage, labels: readLabels(raw) });
+};
+
+/**
+ * Label names from `metadata.labels` (spec FR-9.1).
+ *
+ * An entry without a usable name is skipped rather than failing the page: a label
+ * the plugin cannot read is one tag missing, while refusing the response loses
+ * the whole body.
+ */
+function readLabels(raw: Record<string, unknown>): readonly string[] {
+  const results = asArray(readPath(raw, 'metadata', 'labels', 'results')) ?? [];
+
+  return results.flatMap((entry) => {
+    const name = asNonEmptyString(readPath(entry, 'name'));
+    return name === null ? [] : [name];
+  });
+}
+
+/**
+ * Validates a comment.
+ *
+ * The author is the comment's *creator* rather than whoever last edited it: the
+ * region attributes a remark to the person who made it, and `version.by` on an
+ * edited comment is not that person.
+ */
+export const parseComment: Parser<ConfluenceComment> = (raw) => {
+  if (!isRecord(raw)) return err(malformed('a comment'));
+
+  const id = asNonEmptyString(raw['id']);
+  const storage = asString(readPath(raw, 'body', 'storage', 'value'));
+  if (id === null || storage === null) return err(malformed('a comment'));
+
+  return ok({
+    id,
+    storage,
+    author:
+      asNonEmptyString(readPath(raw, 'history', 'createdBy', 'displayName')) ??
+      asNonEmptyString(readPath(raw, 'history', 'createdBy', 'username')) ??
+      asNonEmptyString(readPath(raw, 'version', 'by', 'displayName')) ??
+      'Unknown',
+    createdAt:
+      asNonEmptyString(readPath(raw, 'history', 'createdDate')) ??
+      asNonEmptyString(readPath(raw, 'version', 'when')) ??
+      '',
+    location:
+      asNonEmptyString(readPath(raw, 'extensions', 'location')) === 'inline' ? 'inline' : 'footer',
+    inlineRef: asNonEmptyString(readPath(raw, 'extensions', 'inlineProperties', 'ref')),
+  });
 };
 
 /** What a page update reports back: the version the edit now sits at (FR-5.4). */
@@ -245,6 +329,23 @@ export const parseUpdatedPage: Parser<ConfluencePageVersion> = (raw) => {
     updatedAt: ref.updatedAt,
     updatedBy: ref.updatedBy,
   });
+};
+
+/**
+ * Validates the response to an attachment upload (spec FR-8.6).
+ *
+ * Confluence answers a `POST` to `child/attachment` with a paged collection
+ * holding the one attachment it created, so the envelope is unwrapped here rather
+ * than at the call site. An empty collection is an error: the caller is about to
+ * write a page body referring to the file by name, and doing that without proof
+ * the upload landed would publish an embed pointing at nothing.
+ */
+export const parseUploadedAttachment: Parser<ConfluenceAttachment> = (raw) => {
+  const paged = parsePaged(raw, parseAttachment);
+  if (!paged.ok) return paged;
+
+  const first = paged.value.results[0];
+  return first === undefined ? err(malformed('an uploaded attachment')) : ok(first);
 };
 
 /**

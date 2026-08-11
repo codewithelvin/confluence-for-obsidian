@@ -309,6 +309,8 @@ function panel(): SyncPanelView {
     controller,
     suspensions,
     startSync: () => undefined,
+    restoreOrphan: () => undefined,
+    deleteOrphan: () => undefined,
   });
 }
 

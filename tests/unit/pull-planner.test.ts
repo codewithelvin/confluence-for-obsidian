@@ -54,6 +54,7 @@ function tracked(id: string, path: string, extra: Partial<PageState> = {}): Page
     storageHash: 'storage',
     fidelity: 'certified',
     lastSyncedAt: '2026-08-01T00:00:00Z',
+    labels: [],
     ...extra,
   };
 }

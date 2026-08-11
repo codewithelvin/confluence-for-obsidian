@@ -1,5 +1,6 @@
 import type { ConfluencePage } from '../api/api-types';
 import type { ConfluenceGateway } from '../api/confluence-client';
+import { unresolvedEmbeds } from '../convert/embed-scan';
 import { verify } from '../convert/round-trip-verifier';
 import { storageToMarkdown } from '../convert/storage-to-markdown';
 import type { ConversionOptions, FragmentMap } from '../convert/types';
@@ -11,8 +12,10 @@ import { pageUrl, splitFrontmatter, type ConfluenceIdentity } from '../vault/fro
 import type { VaultGateway } from '../vault/vault-gateway';
 import { conversionOptionsFor, type ConversionInputs } from './conversion-options';
 import type { FragmentStore } from './fragment-store';
+import { applyLabels } from './label-push';
 import { stripManagedRegions } from './managed-regions';
-import type { PageState } from './sync-state';
+import type { AttachmentState, PageState } from './sync-state';
+import { planUploads, runUploads, type UploadPlan } from './upload-executor';
 
 /**
  * Writing one page back to Confluence (spec §3.5, §6.4.4 B).
@@ -73,7 +76,19 @@ export interface PushBlocked {
 }
 
 export type PushOutcome =
-  | { readonly kind: 'pushed'; readonly state: PageState }
+  | {
+      readonly kind: 'pushed';
+      readonly state: PageState;
+      /**
+       * What did not go with the body, on a push that otherwise succeeded.
+       *
+       * A label call that failed, or a tag Confluence cannot hold as a label
+       * (FR-9.2). Neither is a reason to call the push blocked — the page *is*
+       * published — and neither may be swallowed either, so they travel with the
+       * success and are reported beside it.
+       */
+      readonly warnings: readonly AppError[];
+    }
   | { readonly kind: 'conflict'; readonly conflict: PageConflict }
   | { readonly kind: 'blocked'; readonly blocked: PushBlocked };
 
@@ -104,6 +119,8 @@ interface PreparedPush {
   readonly body: string;
   readonly storage: string;
   readonly options: ConversionOptions;
+  /** Files to send before the body refers to them (FR-8.6). */
+  readonly uploads: UploadPlan;
 }
 
 /**
@@ -194,14 +211,25 @@ async function prepare(
   const fragments = await loadFragments(deps, state);
   if (!fragments.ok) return err(fragments.error);
 
-  const conversion = conversionOptionsFor(
-    { ...deps, spaceKey: target.spaceKey },
+  const inputs = { ...deps, spaceKey: target.spaceKey };
+
+  // Pending uploads are resolved before conversion, not after: an embed pointing at
+  // a file the page does not have converts to literal text, and verification would
+  // then pass on a body that quietly lost a picture. Planning it here means the
+  // gates run against the storage that will actually be sent (FR-8.6).
+  const uploads = planUploads(
+    deps,
+    state.localPath,
+    unresolvedEmbeds(body, fragments.value, conversionOptionsFor(inputs, state.attachments)),
     state.attachments,
   );
+  if (!uploads.ok) return err(blocked(uploads.error));
+
+  const conversion = conversionOptionsFor(inputs, uploads.value.attachments);
   const storage = verified(state, body, fragments.value, conversion, options);
   if (!storage.ok) return err(storage.error);
 
-  return ok({ body, storage: storage.value, options: conversion });
+  return ok({ body, storage: storage.value, options: conversion, uploads: uploads.value });
 }
 
 /**
@@ -217,7 +245,7 @@ async function checkRemote(
   localBody: string,
   conversion: ConversionOptions,
   accepted: number | undefined,
-): Promise<Result<number, PushOutcome>> {
+): Promise<Result<ConfluencePage, PushOutcome>> {
   const remote = await deps.client.getPage(target.state.pageId);
   if (!remote.ok) return err(blocked(remote.error));
 
@@ -225,7 +253,7 @@ async function checkRemote(
   // user read a diff against and chose to supersede. Anything else is a change
   // nobody here has seen.
   const expected = remote.value.version === target.state.remoteVersion;
-  if (expected || remote.value.version === accepted) return ok(remote.value.version);
+  if (expected || remote.value.version === accepted) return ok(remote.value);
 
   return err({
     kind: 'conflict',
@@ -298,12 +326,65 @@ export async function pushPage(
   const prepared = await prepare(deps, target, options);
   if (!prepared.ok) return prepared.error;
 
-  const { body, storage, options: conversion } = prepared.value;
+  const { body, storage, options: conversion, uploads } = prepared.value;
 
   const checked = await checkRemote(deps, target, body, conversion, options.ontoVersion);
   if (!checked.ok) return checked.error;
+  const remote = checked.value;
 
+  // Only now, with every gate passed and the remote where it was expected: an
+  // upload cannot be taken back (FR-8.7), so nothing is sent for a page that was
+  // never going to be written.
+  const attachments = await runUploads(deps, target.state.pageId, uploads);
+  if (!attachments.ok) return blocked(attachments.error);
+
+  const written = await writeBody(deps, target, storage, remote);
+  if (!written.ok) return written.error;
+
+  const labels = await applyLabels(deps, target.state);
+
+  return record(deps, target, storage, written.value, {
+    attachments: attachments.value,
+    labels: labels.labels,
+    warnings: labels.warnings,
+  });
+}
+
+/** What the page now sits at, whether or not this push had a body to send. */
+interface WrittenVersion {
+  readonly version: number;
+  readonly updatedAt: string;
+  readonly updatedBy: string;
+}
+
+/**
+ * Writes the body, unless the page already holds exactly it.
+ *
+ * Compared against the *remote's current* storage rather than the last-synced hash,
+ * which matters for a "Keep Local" push: there the remote has moved, so a body
+ * equal to what was pulled is still a body that has to be written over what a
+ * colleague put there. Byte-identical storage, though, means a `PUT` would only add
+ * a version to the page's history saying nothing — noise in a corporate wiki, and
+ * the most common shape of push once tags are in play, where the user changed a tag
+ * and nothing else.
+ */
+async function writeBody(
+  deps: PushDeps,
+  target: PushTarget,
+  storage: string,
+  remote: ConfluencePage,
+): Promise<Result<WrittenVersion, PushOutcome>> {
   const { state } = target;
+
+  if (storage === remote.storage) {
+    deps.logger.debug(`"${state.title}" is already this body in Confluence; no version written.`);
+    return ok({
+      version: remote.version,
+      updatedAt: remote.updatedAt,
+      updatedBy: remote.updatedBy,
+    });
+  }
+
   const updated = await deps.client.updatePage({
     id: state.pageId,
     title: state.title,
@@ -311,12 +392,10 @@ export async function pushPage(
     parentId: state.parentId,
     // Confluence accepts the write only at exactly one past the current version,
     // which is what makes a stale push a 409 instead of an overwrite (FR-5.4).
-    version: checked.value + 1,
+    version: remote.version + 1,
     storage,
   });
-  if (!updated.ok) return blocked(updated.error);
-
-  return record(deps, target, storage, updated.value);
+  return updated.ok ? ok(updated.value) : err(blocked(updated.error));
 }
 
 /**
@@ -326,11 +405,19 @@ export async function pushPage(
  * hash recorded afterwards is of the file as it actually ended up, so the next
  * sync sees an unmodified note rather than one that pushed itself.
  */
+/** What the push changed besides the body, to fold into the page's record. */
+interface PushedExtras {
+  readonly attachments: Readonly<Record<string, AttachmentState>>;
+  readonly labels: readonly string[];
+  readonly warnings: readonly AppError[];
+}
+
 async function record(
   deps: PushDeps,
   target: PushTarget,
   storage: string,
-  updated: { readonly version: number; readonly updatedAt: string; readonly updatedBy: string },
+  updated: WrittenVersion,
+  extras: PushedExtras,
 ): Promise<PushOutcome> {
   const { state } = target;
   const identity: ConfluenceIdentity = {
@@ -363,9 +450,15 @@ async function record(
     state: {
       ...state,
       remoteVersion: updated.version,
+      // The uploads are now attachments of the page like any other, so the next
+      // pull recognises the files already in the vault instead of fetching them
+      // back (FR-8.3), and the reverse conversion keeps resolving the embeds.
+      attachments: extras.attachments,
+      labels: extras.labels,
       localHash: await sha256(written.value),
       storageHash,
       lastSyncedAt: deps.now(),
     },
+    warnings: extras.warnings,
   };
 }

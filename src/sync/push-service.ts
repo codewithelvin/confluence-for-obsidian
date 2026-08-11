@@ -4,7 +4,6 @@ import { AppError } from '../util/errors';
 import type { Logger } from '../util/logger';
 import { err, ok, type Result } from '../util/result';
 import type { VaultGateway } from '../vault/vault-gateway';
-import { attachmentHook } from './attachment-executor';
 import type { BackupStore } from './backup-store';
 import {
   resolveConflict,
@@ -16,6 +15,7 @@ import type { FragmentStore } from './fragment-store';
 import { LinkIndex, mirroredPages } from './link-index';
 import { locateNote, type LocatorDeps } from './note-locator';
 import type { ExecutorDeps } from './pull-executor';
+import { pullHooks } from './pull-hooks';
 import { pushPage, type PageConflict, type PushBlocked, type PushDeps } from './push-executor';
 import type { PageState, SyncStateStore } from './sync-state';
 
@@ -54,6 +54,14 @@ export interface PushReport {
   readonly pushed: readonly PushedPage[];
   /** Pages a gate refused, each with the reason (FR-5.2, FR-5.3). */
   readonly blocked: readonly PushFailure[];
+  /**
+   * Pages that *were* published, with something that did not go with them.
+   *
+   * A label call that failed, or a tag Confluence cannot hold (FR-9.2). Separate
+   * from `blocked` because the distinction matters to the reader: the page is in
+   * Confluence, and one piece of metadata is not.
+   */
+  readonly warnings: readonly PushFailure[];
   readonly conflicts: readonly ConflictOutcome[];
   /** Unmodified notes. No request was made for any of them (US-4). */
   readonly skipped: number;
@@ -178,6 +186,7 @@ export class PushService {
 
     const pushed: PushedPage[] = [];
     const blocked: PushFailure[] = [];
+    const warnings: PushFailure[] = [];
     const conflicts: PageConflict[] = [];
     const states = new Map<string, PageState>();
 
@@ -187,6 +196,9 @@ export class PushService {
       if (outcome.kind === 'pushed') {
         states.set(outcome.state.pageId, outcome.state);
         pushed.push(named(outcome.state));
+        for (const error of outcome.warnings) {
+          warnings.push({ ...named(outcome.state), error });
+        }
       } else if (outcome.kind === 'conflict') {
         conflicts.push(outcome.conflict);
       } else {
@@ -207,7 +219,7 @@ export class PushService {
     }
 
     await this.record(subscription.id, states);
-    return { pushed, blocked, conflicts: resolved, skipped: 0 };
+    return { pushed, blocked, warnings, conflicts: resolved, skipped: 0 };
   }
 
   /** One page, with the force retry FR-5.7 allows once the user has confirmed it. */
@@ -304,18 +316,16 @@ export class PushService {
 
     return {
       ...push,
-      attachments: attachmentHook(
-        {
-          client,
-          vault: this.deps.vault,
-          logger: this.deps.logger,
-          mountPath: subscription.mountPath,
-          sizeLimitBytes: settings.attachmentSizeLimitMb * 1_048_576,
-          referencedOnly: settings.attachmentsReferencedOnly,
-        },
-        (pageId) =>
+      ...pullHooks({
+        client,
+        vault: this.deps.vault,
+        logger: this.deps.logger,
+        subscription,
+        attachmentLimitBytes: settings.attachmentSizeLimitMb * 1_048_576,
+        attachmentsReferencedOnly: settings.attachmentsReferencedOnly,
+        recorded: (pageId) =>
           this.deps.state.forSubscription(subscription.id).pages[pageId]?.attachments ?? {},
-      ),
+      }),
       baseUrl: connection.baseUrl,
     };
   }

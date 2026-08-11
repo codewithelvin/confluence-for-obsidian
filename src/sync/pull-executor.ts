@@ -1,3 +1,4 @@
+import type { ConfluencePage } from '../api/api-types';
 import type { ConfluenceGateway } from '../api/confluence-client';
 import { certify } from '../convert/round-trip-verifier';
 import type { ConversionOptions, PageTarget } from '../convert/types';
@@ -8,8 +9,10 @@ import type { Logger } from '../util/logger';
 import { pageUrl, type ConfluenceIdentity } from '../vault/frontmatter';
 import { parentPath, type VaultGateway } from '../vault/vault-gateway';
 import type { AttachmentOutcome, SkippedAttachment } from './attachment-executor';
+import type { CommentOutcome } from './comments-executor';
 import { conversionOptionsFor } from './conversion-options';
 import type { FragmentStore } from './fragment-store';
+import { withManagedRegions } from './managed-regions';
 import type { LocalPage, PullItem, RelocateItem } from './pull-planner';
 import type { AttachmentState, PageState } from './sync-state';
 import type { SyncFailure } from './sync-types';
@@ -44,6 +47,14 @@ export interface ExecutorDeps {
    * nothing about which ones or how.
    */
   readonly attachments: (item: PullItem, storage: string) => Promise<AttachmentOutcome>;
+  /**
+   * Fetches the page's comments and renders the managed region (FR-9.3).
+   *
+   * Injected for the same reason attachments are, and consulted *after* the body is
+   * converted: the region is appended to the converter's output and is not part of
+   * what gets converted.
+   */
+  readonly comments: (item: PullItem) => Promise<CommentOutcome>;
   readonly now: () => string;
 }
 
@@ -53,6 +64,10 @@ export interface PullOutcome {
   readonly failures: readonly SyncFailure[];
   readonly attachmentsDownloaded: number;
   readonly skippedAttachments: readonly SkippedAttachment[];
+  /** Comments written into managed regions this pull (FR-9.3). */
+  readonly commentsPulled: number;
+  /** Notes that now carry a comments region, for the report. */
+  readonly commentRegions: number;
 }
 
 /** Collected as pages are written, then reported together (FR-3.9). */
@@ -62,6 +77,8 @@ interface PullAccumulator {
   readonly failures: SyncFailure[];
   readonly skippedAttachments: SkippedAttachment[];
   attachmentsDownloaded: number;
+  commentsPulled: number;
+  commentRegions: number;
 }
 
 function emptyAccumulator(): PullAccumulator {
@@ -71,6 +88,8 @@ function emptyAccumulator(): PullAccumulator {
     failures: [],
     skippedAttachments: [],
     attachmentsDownloaded: 0,
+    commentsPulled: 0,
+    commentRegions: 0,
   };
 }
 
@@ -132,6 +151,45 @@ function conversionOptions(
 }
 
 /**
+ * Downloads the page's attachments before its body is converted.
+ *
+ * Before, not after: the converter can only write an embed for a file already on
+ * disk (FR-8.2), and an embed pointing at nothing is a broken image.
+ */
+async function downloadAttachments(
+  deps: ExecutorDeps,
+  item: PullItem,
+  storage: string,
+  outcome: PullAccumulator,
+): Promise<Readonly<Record<string, AttachmentState>>> {
+  const attachments = await deps.attachments(item, storage);
+
+  outcome.attachmentsDownloaded += attachments.downloaded;
+  outcome.skippedAttachments.push(...attachments.skipped);
+  outcome.failures.push(...attachments.failures);
+  return attachments.attachments;
+}
+
+/**
+ * Fetches the comments region, which is appended to the converted body.
+ *
+ * After conversion and outside certification: the region is not the page, and a
+ * colleague's remark must never be able to make a page read-only.
+ */
+async function fetchComments(
+  deps: ExecutorDeps,
+  item: PullItem,
+  outcome: PullAccumulator,
+): Promise<string> {
+  const comments = await deps.comments(item);
+
+  outcome.commentsPulled += comments.comments;
+  if (comments.region.length > 0) outcome.commentRegions += 1;
+  outcome.failures.push(...comments.failures);
+  return comments.region;
+}
+
+/**
  * Converts and writes one page.
  *
  * Certification never blocks the write (FR-4.4): a page that cannot round-trip
@@ -141,28 +199,25 @@ function conversionOptions(
 async function writePage(
   deps: ExecutorDeps,
   item: PullItem,
-  storage: string,
+  page: ConfluencePage,
   outcome: PullAccumulator,
 ): Promise<AppError | null> {
-  // Attachments first: the converter can only write an embed for a file already
-  // on disk (FR-8.2), so the download has to happen before the body is converted,
-  // not after it.
-  const attachments = await deps.attachments(item, storage);
-  outcome.attachmentsDownloaded += attachments.downloaded;
-  outcome.skippedAttachments.push(...attachments.skipped);
-  outcome.failures.push(...attachments.failures);
+  const { storage } = page;
 
-  const byFilename = attachments.attachments;
+  const byFilename = await downloadAttachments(deps, item, storage, outcome);
   const converted = certify(storage, conversionOptions(deps, item, byFilename));
   if (!converted.ok) return converted.error;
 
+  const region = await fetchComments(deps, item, outcome);
   const fidelity = converted.value.certified ? 'certified' : 'degraded';
   const written = await deps.vault.writeNote({
     path: item.path,
-    body: converted.value.markdown,
+    body: withManagedRegions(converted.value.markdown, region),
     identity: identityFor(deps, item, fidelity),
     alias: item.alias,
     previousAlias: item.previousAlias,
+    tags: page.labels,
+    previousTags: item.previousLabels,
   });
   if (!written.ok) return written.error;
 
@@ -184,6 +239,10 @@ async function writePage(
     isFolderNote: item.isFolderNote,
     alias: item.alias,
     attachments: byFilename,
+    // What the page's labels are *and* what the plugin now owns in `tags`: the two
+    // are the same set, and recording it is what lets the next pull remove a label
+    // that has gone without touching a tag the user added (FR-9.1).
+    labels: page.labels,
     localHash: await sha256(written.value),
     storageHash,
     fidelity,
@@ -222,9 +281,7 @@ export async function pullPages(
       const item = batch[offset];
       if (item === undefined) continue;
 
-      const error = result.ok
-        ? await writePage(deps, item, result.value.storage, outcome)
-        : result.error;
+      const error = result.ok ? await writePage(deps, item, result.value, outcome) : result.error;
       if (error !== null) outcome.failures.push(failure(item.page.id, item.page.title, error));
 
       done += 1;
@@ -240,6 +297,8 @@ export interface SinglePageTarget {
   readonly path: string;
   readonly isFolderNote: boolean;
   readonly alias: string | null;
+  /** Labels the note currently holds on the plugin's behalf (FR-9.1). */
+  readonly labels: readonly string[];
 }
 
 /**
@@ -270,8 +329,9 @@ export async function pullSinglePage(
       // stands in for the title — is not its business either.
       alias: target.alias,
       previousAlias: target.alias,
+      previousLabels: target.labels,
     },
-    fetched.value.storage,
+    fetched.value,
     outcome,
   );
   if (error !== null) return err(error);

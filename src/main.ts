@@ -11,18 +11,21 @@ import {
 import { CredentialStore, resolveSafeStorage } from './auth/credential-store';
 import { registerPushCommands } from './commands/push-commands';
 import { registerCommands } from './commands/register-commands';
+import { registerStructureCommands } from './commands/structure-commands';
 import { SettingsStore } from './settings/settings-store';
 import { ConfluenceSettingTab } from './settings/settings-tab';
 import type { ConnectionProfile, Subscription } from './settings/settings-types';
 import { BackupStore } from './sync/backup-store';
 import { FragmentStore } from './sync/fragment-store';
 import { NoteService } from './sync/note-service';
+import { PageStructureService } from './sync/page-structure-service';
 import { PushService, type PushPrompts } from './sync/push-service';
 import { SuspensionRegistry } from './sync/suspension';
 import { SyncController } from './sync/sync-controller';
 import { SyncStateStore } from './sync/sync-state';
-import { ConfirmModal } from './ui/confirm-modal';
+import { orphanActions, type OrphanActions } from './ui/orphan-actions';
 import { askAboutConflicts, pushPrompts } from './ui/push-prompts';
+import { askAboutDeletions, askAboutStructure } from './ui/sync-prompts';
 import { describeConstruct, registerPlaceholderRenderer } from './ui/placeholder-renderer';
 import { StatusBar } from './ui/status-bar';
 import { SYNC_PANEL_VIEW_TYPE, SyncPanelView } from './ui/sync-panel-view';
@@ -49,6 +52,7 @@ export default class ConfluenceConnectorPlugin extends Plugin {
   private readonly controller: SyncController;
   private readonly notes: NoteService;
   private readonly push: PushService;
+  private readonly pageStructure: PageStructureService;
   private statusBar: StatusBar | null = null;
 
   /** Shared so the concurrency cap applies across every connection at once. */
@@ -95,6 +99,7 @@ export default class ConfluenceConnectorPlugin extends Plugin {
     });
     this.notes = new NoteService(shared);
     this.push = new PushService(shared);
+    this.pageStructure = new PageStructureService(shared);
   }
 
   /** Modal-backed answers to the questions a push has to ask (FR-5.2, FR-5.7, FR-6.2). */
@@ -129,6 +134,22 @@ export default class ConfluenceConnectorPlugin extends Plugin {
       }),
     );
 
+    this.registerAllCommands();
+
+    this.registerPlaceholders();
+    this.startStatusBar();
+
+    if (!this.credentials.persistenceAvailable) {
+      this.logger.warn(
+        'The OS keychain is unavailable. Tokens will be held in memory only for this session.',
+      );
+    }
+
+    this.logger.debug('Loaded.');
+  }
+
+  /** Every command the plugin adds, in one place (§6.1: thin dispatch only). */
+  private registerAllCommands(): void {
     registerCommands({
       plugin: this,
       store: this.settingsStore,
@@ -149,17 +170,14 @@ export default class ConfluenceConnectorPlugin extends Plugin {
       push: this.push,
       prompts: () => this.prompts(),
     });
-
-    this.registerPlaceholders();
-    this.startStatusBar();
-
-    if (!this.credentials.persistenceAvailable) {
-      this.logger.warn(
-        'The OS keychain is unavailable. Tokens will be held in memory only for this session.',
-      );
-    }
-
-    this.logger.debug('Loaded.');
+    registerStructureCommands({
+      plugin: this,
+      store: this.settingsStore,
+      pages: this.pageStructure,
+      openNote: (path) => {
+        void this.app.workspace.openLinkText(path, '', false);
+      },
+    });
   }
 
   override onunload(): void {
@@ -184,6 +202,28 @@ export default class ConfluenceConnectorPlugin extends Plugin {
       suspensions: this.suspensions,
       startSync: (subscription) => {
         this.startSync(subscription);
+      },
+      ...this.orphanActions(),
+    });
+  }
+
+  /** FR-7.4's Restore and Delete, which only the panel can offer. */
+  private orphanActions(): OrphanActions {
+    return orphanActions({
+      app: this.app,
+      restore: async (subscription, pageId) => {
+        const restored = await this.notes.restoreOrphan(subscription, pageId);
+        return {
+          ok: restored.ok,
+          message: restored.ok ? `Restored "${restored.value.title}".` : restored.error.userMessage,
+        };
+      },
+      remove: async (subscription, pageId) => {
+        const deleted = await this.pageStructure.deleteOrphan(subscription, pageId);
+        return {
+          ok: deleted.ok,
+          message: deleted.ok ? 'Deleted the page in Confluence.' : deleted.error.userMessage,
+        };
       },
     });
   }
@@ -258,9 +298,11 @@ export default class ConfluenceConnectorPlugin extends Plugin {
 
   private async runSync(subscription: Subscription): Promise<void> {
     const result = await this.controller.sync(subscription, {
-      confirmDeletions: (pages) => this.confirmDeletions(pages.map((page) => page.path)),
+      confirmDeletions: askAboutDeletions(this.app),
       // Asked before the sync writes anything (§6.6.2 step 5, FR-6.2).
       resolveConflicts: askAboutConflicts(this.app),
+      // FR-7.8: nothing structural is sent without the user seeing the whole list.
+      confirmStructure: askAboutStructure(this.app, subscription.spaceKey),
     });
 
     if (!result.ok) {
@@ -276,30 +318,6 @@ export default class ConfluenceConnectorPlugin extends Plugin {
         (problems === 0 ? '.' : `, ${String(problems)} need attention — see the sync panel.`),
       problems === 0 ? 5000 : 12_000,
     );
-  }
-
-  private confirmDeletions(paths: readonly string[]): Promise<boolean> {
-    return new Promise((resolve) => {
-      new ConfirmModal(
-        this.app,
-        {
-          title: 'Pages deleted in Confluence',
-          body:
-            `${String(paths.length)} page(s) no longer exist in Confluence. Move their notes to ` +
-            `trash?\n\n${paths.slice(0, 20).join('\n')}`,
-          confirmText: 'Move to trash',
-          destructive: true,
-          // Dismissing the prompt means "do not delete" — the safe reading of
-          // silence when the alternative is removing the user's files.
-          onDismiss: () => {
-            resolve(false);
-          },
-        },
-        () => {
-          resolve(true);
-        },
-      ).open();
-    });
   }
 
   private createClient(connection: ConnectionProfile): ConfluenceClient {

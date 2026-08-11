@@ -34,5 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can. Neither ever guesses.
 - Golden corpus of 60 fixtures asserting 100% idempotence plus lossless
   round-tripping wherever claimed, regenerated with `npm run test:bless`.
+- Confluence labels are merged into a note's `tags`, and tag changes are pushed
+  back as label add and remove calls. Only the labels the plugin itself wrote are
+  ever removed, and a tag Confluence cannot store as a label is reported rather
+  than dropped.
+- Page comments are pulled into a collapsed block at the end of each note,
+  switchable per subscription and per note (`confluenceComments: false`). The
+  block is regenerated on every pull and is never pushed back.
+- Files a note embeds but the page does not have are uploaded on push, after
+  every gate has passed: an attachment cannot be un-sent, so nothing is uploaded
+  for a page that turns out not to be writable.
+- A push whose body is already byte-identical to the page no longer writes a
+  version, so changing only a tag leaves no empty entry in the page's history.
+
+<!-- Note: entries for the read-only sync (M3) and the write path (M5) were never
+     added and are missing above. -->
 
 [Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/commits/main

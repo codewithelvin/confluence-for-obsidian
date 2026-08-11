@@ -6,17 +6,22 @@ import type { Logger } from '../util/logger';
 import { err, ok, type Result } from '../util/result';
 import { buildPathMap, type PathMap } from '../vault/path-mapper';
 import type { VaultGateway } from '../vault/vault-gateway';
-import { attachmentHook } from './attachment-executor';
 import type { BackupStore } from './backup-store';
 import { conflictPhase, type ConflictPhaseResult } from './conflict-phase';
 import { nextSubscriptionState, type AppliedSync } from './sync-persist';
 import { buildSyncReport } from './sync-report';
 import type { FragmentStore } from './fragment-store';
-import { LinkIndex, linkPath, type MirroredPage } from './link-index';
+import { syncLinkIndex, type LinkIndex, type MirroredPage } from './link-index';
+import { classifyOrphans } from './orphans';
+import { discover, preflight } from './sync-discovery';
 import { deletePages, pullPages, relocate, type ExecutorDeps } from './pull-executor';
+import { pullHooks } from './pull-hooks';
 import { buildPullPlan, type PullPlan } from './pull-planner';
+import { structurePhase, type StructurePhaseResult } from './structure-phase';
+import { pullTargets, type SyncWork } from './pull-targets';
+import { buildStructurePlan, type StructurePlan } from './structure-planner';
 import { isSuspendingError, type SuspensionRegistry } from './suspension';
-import type { SyncStateStore } from './sync-state';
+import type { PageState, SyncStateStore } from './sync-state';
 import type { SyncCallbacks, SyncFailure, SyncReport } from './sync-types';
 
 /**
@@ -62,26 +67,6 @@ export interface SyncRequest {
   readonly attachmentsReferencedOnly: boolean;
 }
 
-/**
- * Where every mirrored page lives, for wikilink resolution (FR-4.7).
- *
- * This sync's own placements go last so they win: a page being moved right now
- * must resolve to where it is going, not to where the index still has it.
- */
-function links(
-  request: SyncRequest,
-  remote: readonly ConfluencePageRef[],
-  paths: PathMap,
-): LinkIndex {
-  const here = remote.flatMap((page) => {
-    const mapped = paths.byId.get(page.id);
-    if (mapped === undefined) return [];
-    return [{ spaceKey: page.spaceKey, title: page.title, path: linkPath(mapped.notePath) }];
-  });
-
-  return new LinkIndex([...(request.mirrored ?? []), ...here]);
-}
-
 export class SyncEngine {
   constructor(private readonly deps: SyncEngineDeps) {}
 
@@ -98,10 +83,10 @@ export class SyncEngine {
       );
     }
 
-    const preflight = await this.preflight(request, callbacks);
-    if (!preflight.ok) return this.fail(request, preflight.error);
+    const ready = await preflight(request, callbacks);
+    if (!ready.ok) return this.fail(request, ready.error);
 
-    const remote = await this.discover(request, callbacks);
+    const remote = await discover(request, callbacks);
     if (!remote.ok) return this.fail(request, remote.error);
 
     const root = await this.resolveRoot(request);
@@ -113,14 +98,25 @@ export class SyncEngine {
     if (!local.ok) return err(local.error);
 
     const paths = this.mapPaths(request, remote.value, root.value);
-    const plan = buildPullPlan({
+    const state = this.deps.state.forSubscription(request.subscription.id);
+    const plan = buildPullPlan({ remote: remote.value, local: local.value, state, paths });
+
+    const structure = buildStructurePlan({
       remote: remote.value,
       local: local.value,
-      state: this.deps.state.forSubscription(request.subscription.id),
-      paths,
+      state,
+      mountPath: request.subscription.mountPath,
+      rootPageId: root.value,
     });
 
-    return ok(await this.apply(request, plan, links(request, remote.value, paths), callbacks));
+    return ok(
+      await this.apply(
+        request,
+        { plan, structure, scanned: local.value },
+        syncLinkIndex(request.mirrored ?? [], remote.value, paths),
+        callbacks,
+      ),
+    );
   }
 
   /**
@@ -132,64 +128,6 @@ export class SyncEngine {
     if (explicit !== null) return ok(explicit);
 
     return request.client.spaceHomepageId(request.subscription.spaceKey);
-  }
-
-  /** Verifies credentials and version before anything is written (§6.6.2 step 1). */
-  private async preflight(
-    request: SyncRequest,
-    callbacks: SyncCallbacks,
-  ): Promise<Result<void, AppError>> {
-    callbacks.onProgress?.({
-      phase: 'preflight',
-      done: 0,
-      total: null,
-      detail: 'Checking the connection',
-    });
-
-    const check = await request.client.checkConnection();
-    if (!check.ok) return check;
-
-    if (!check.value.versionSupported) {
-      return err(
-        new AppError(
-          'VERSION_UNSUPPORTED',
-          `This Confluence is version ${check.value.version?.raw ?? 'unknown'}. Personal Access ` +
-            'Tokens need Data Center 7.9 or newer, so this connection cannot be synced.',
-          { action: 'open-docs' },
-        ),
-      );
-    }
-    return ok(undefined);
-  }
-
-  private async discover(
-    request: SyncRequest,
-    callbacks: SyncCallbacks,
-  ): Promise<Result<readonly ConfluencePageRef[], AppError>> {
-    callbacks.onProgress?.({
-      phase: 'discovering',
-      done: 0,
-      total: null,
-      detail: request.subscription.spaceKey,
-    });
-
-    const options = {
-      onProgress: (collected: number) => {
-        callbacks.onProgress?.({
-          phase: 'discovering',
-          done: collected,
-          total: null,
-          detail: `${String(collected)} pages found`,
-        });
-      },
-      ...(callbacks.isCancelled === undefined ? {} : { isCancelled: callbacks.isCancelled }),
-    };
-
-    return request.client.listSubtree(
-      request.subscription.spaceKey,
-      request.subscription.rootPageId,
-      options,
-    );
   }
 
   private mapPaths(
@@ -222,28 +160,27 @@ export class SyncEngine {
       strictMarkup: request.strictMarkup,
       resolveTarget: linkIndex.resolveTarget,
       resolveVaultPath: linkIndex.resolveVaultPath,
-      attachments: attachmentHook(
-        {
-          client: request.client,
-          vault: this.deps.vault,
-          logger: this.deps.logger,
-          mountPath: request.subscription.mountPath,
-          sizeLimitBytes: request.attachmentLimitBytes,
-          referencedOnly: request.attachmentsReferencedOnly,
-        },
-        (pageId) =>
+      ...pullHooks({
+        client: request.client,
+        vault: this.deps.vault,
+        logger: this.deps.logger,
+        subscription: request.subscription,
+        attachmentLimitBytes: request.attachmentLimitBytes,
+        attachmentsReferencedOnly: request.attachmentsReferencedOnly,
+        recorded: (pageId) =>
           this.deps.state.forSubscription(request.subscription.id).pages[pageId]?.attachments ?? {},
-      ),
+      }),
       now: this.deps.now,
     };
   }
 
   private async apply(
     request: SyncRequest,
-    plan: PullPlan,
+    work: SyncWork,
     linkIndex: LinkIndex,
     callbacks: SyncCallbacks,
   ): Promise<SyncReport> {
+    const { plan, structure } = work;
     const executor = this.executorFor(request, linkIndex);
     const failures: SyncFailure[] = [];
 
@@ -253,16 +190,23 @@ export class SyncEngine {
     const resolved = await this.resolveConflicts(request, plan, executor, callbacks);
     failures.push(...resolved.failures);
 
-    const relocated = await this.relocateAll(executor, plan, failures);
+    const relocated = await this.relocateAll(executor, plan, structure, failures);
     const deleted = await this.deleteAll(executor, plan, callbacks, failures);
 
-    const pulled = await pullPages(executor, plan.pull, {
+    const pulled = await pullPages(executor, pullTargets(work), {
       onPage: (done, total) => {
         callbacks.onProgress?.({ phase: 'applying', done, total, detail: 'Writing pages' });
       },
       ...(callbacks.isCancelled === undefined ? {} : { isCancelled: callbacks.isCancelled }),
     });
     failures.push(...pulled.failures);
+
+    // Structure last of the three (§6.6.2 step 6c), and built on the records the
+    // pull has just written: a page whose body arrived this sync and whose file the
+    // user also renamed must keep the hash of what was written, or the next sync
+    // reports it as locally modified.
+    const restructured = await this.restructure(request, structure, pulled.states, callbacks);
+    failures.push(...restructured.failures);
 
     await this.persist(
       request,
@@ -271,10 +215,12 @@ export class SyncEngine {
         deleted,
         // Conflict outcomes first, so a page the sync also pulled ends on the
         // pull's record rather than the resolution's — they cannot both be right,
-        // and the pull is the later write.
+        // and the pull is the later write. Structural records come last for the
+        // same reason: they are the latest thing to have touched the note.
         states: [
           ...resolved.outcomes.flatMap((o) => (o.state === null ? [] : [o.state])),
           ...pulled.states,
+          ...restructured.states,
         ],
       },
       plan,
@@ -287,10 +233,39 @@ export class SyncEngine {
       relocated: relocated.length,
       deleted: deleted.length,
       pulled,
+      structure: restructured,
+      rejected: structure.rejected,
+      orphans: classifyOrphans(this.deps.vault, plan.orphans, request.subscription.mountPath),
       failures,
       cancelled: callbacks.isCancelled?.() === true,
       finishedAt: this.deps.now(),
     });
+  }
+
+  /** The structure step (spec §6.6.2 step 6c, FR-7.5, FR-7.6, FR-7.8). */
+  private restructure(
+    request: SyncRequest,
+    structure: StructurePlan,
+    pulled: readonly PageState[],
+    callbacks: SyncCallbacks,
+  ): Promise<StructurePhaseResult> {
+    const current = this.deps.state.forSubscription(request.subscription.id).pages;
+
+    return structurePhase(
+      {
+        client: request.client,
+        vault: this.deps.vault,
+        logger: this.deps.logger,
+        baseUrl: request.baseUrl,
+        spaceKey: request.subscription.spaceKey,
+        now: this.deps.now,
+      },
+      {
+        plan: structure,
+        pages: { ...current, ...Object.fromEntries(pulled.map((page) => [page.pageId, page])) },
+        confirm: callbacks.confirmStructure,
+      },
+    );
   }
 
   /** The conflict step (spec §6.6.2 step 5, FR-6.2, FR-6.5). */
@@ -317,14 +292,23 @@ export class SyncEngine {
     );
   }
 
+  /**
+   * Remote-driven moves and renames (FR-3.6, FR-3.7).
+   *
+   * A page the structure planner refused because it changed on *both* sides is
+   * skipped: the user has been told the change was not applied, and quietly applying
+   * the remote half of it would move their file anyway.
+   */
   private async relocateAll(
     executor: ExecutorDeps,
     plan: PullPlan,
+    structure: StructurePlan,
     failures: SyncFailure[],
   ): Promise<PullPlan['relocate']> {
     const done: PullPlan['relocate'][number][] = [];
 
     for (const item of plan.relocate) {
+      if (structure.suppressRelocate.has(item.pageId)) continue;
       const error = await relocate(executor, item);
       if (error === null) done.push(item);
       else failures.push({ pageId: item.pageId, title: item.title, error });

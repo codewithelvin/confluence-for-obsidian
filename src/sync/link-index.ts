@@ -1,4 +1,6 @@
+import type { ConfluencePageRef } from '../api/api-types';
 import type { PageTarget } from '../convert/types';
+import type { PathMap } from '../vault/path-mapper';
 import type { Subscription } from '../settings/settings-types';
 import type { SubscriptionState } from './sync-state';
 
@@ -93,4 +95,24 @@ export class LinkIndex {
   readonly resolveVaultPath = (path: string): PageTarget | null => {
     return this.byPath.get(path) ?? null;
   };
+}
+
+/**
+ * Where every mirrored page lives, for wikilink resolution (FR-4.7).
+ *
+ * This sync's own placements go last so they win: a page being moved right now
+ * must resolve to where it is going, not to where the index still has it.
+ */
+export function syncLinkIndex(
+  mirrored: readonly MirroredPage[],
+  remote: readonly ConfluencePageRef[],
+  paths: PathMap,
+): LinkIndex {
+  const here = remote.flatMap((page) => {
+    const mapped = paths.byId.get(page.id);
+    if (mapped === undefined) return [];
+    return [{ spaceKey: page.spaceKey, title: page.title, path: linkPath(mapped.notePath) }];
+  });
+
+  return new LinkIndex([...mirrored, ...here]);
 }

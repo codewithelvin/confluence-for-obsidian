@@ -36,7 +36,7 @@ const SUBSCRIPTION: Subscription = {
 };
 
 function emptyReport(extra: Partial<PushReport> = {}): PushReport {
-  return { pushed: [], blocked: [], conflicts: [], skipped: 0, ...extra };
+  return { pushed: [], blocked: [], warnings: [], conflicts: [], skipped: 0, ...extra };
 }
 
 interface Recorded {

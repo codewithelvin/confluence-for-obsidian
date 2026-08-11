@@ -321,3 +321,129 @@ describe("a table holding an inline comment's anchor (FR-4.9, FR-4.10)", () => {
     expect(certified(prose)).toBe(true);
   });
 });
+
+/**
+ * The two defects that made an HTML table stop being one (D15, FR-4.10).
+ *
+ * A CommonMark HTML block ends at a **blank line**, and Markdown puts only a
+ * single newline between two blocks inside a list item. Between them those two
+ * facts accounted for more unpushable pages in the mirror than anything else:
+ * 56% of the 592 EP notes holding an HTML table were read-only, against 6.6% of
+ * notes without one, and a further 953 preserved tables were opaque purely
+ * because of where they sat.
+ *
+ * Both are fixed on the DOM, before serialisation. `CANONICAL` collapses runs of
+ * whitespace on both sides of the comparison (§6.4.5), which is what makes
+ * rewriting insignificant whitespace free in certification terms.
+ */
+describe('a blank line inside a projected table (D15)', () => {
+  /** `colspan` is what puts this table on the HTML projection path at all. */
+  const table = (cell: string): string =>
+    `<table><tbody><tr><td colspan="2">${cell}</td></tr></tbody></table>`;
+
+  it('renders the table instead of hiding it behind a placeholder', () => {
+    const storage = table('<p>alpha</p>\n\n<p>beta</p>');
+
+    expect(convert(storage)).not.toContain('```confluence-block');
+    expect(convert(storage)).toContain('<p>alpha</p>');
+    expect(convert(storage)).toContain('<p>beta</p>');
+    expect(certified(storage)).toBe(true);
+  });
+
+  it('leaves no blank line in the note, which would cut the block in two', () => {
+    const storage = table('<p>alpha</p>\n\n\n<p>beta</p>');
+
+    expect(convert(storage)).not.toMatch(/\n[ \t]*\n/);
+    expect(certified(storage)).toBe(true);
+  });
+
+  it('keeps the paragraph after the table out of the table', () => {
+    const storage = `${table('<p>alpha</p>\n\n<p>beta</p>')}<p>after</p>`;
+
+    expect(pushed(storage)).toContain('</table><p>after</p>');
+    expect(certified(storage)).toBe(true);
+  });
+
+  it('stays preserved when the blank line is inside a preformatted block', () => {
+    // There the whitespace *is* the content, so it cannot be rewritten and the
+    // table cannot be one HTML block. An honest placeholder is the only answer.
+    const storage = table('<pre>one\n\ntwo</pre>');
+
+    expect(convert(storage)).toContain('```confluence-block');
+    expect(certified(storage)).toBe(true);
+  });
+
+  it('says why such a table is preserved, rather than blaming macros', () => {
+    // A label describing the wrong thing is its own bug: this table holds no
+    // macro, image or link.
+    expect(convert(table('<pre>one\n\ntwo</pre>'))).toContain('preformatted text');
+    expect(convert(table('<code>one\n\ntwo</code>'))).toContain('preformatted text');
+  });
+
+  it('still renders a preformatted block that has no blank line', () => {
+    const storage = table('<pre>one\ntwo</pre>');
+
+    expect(convert(storage)).not.toContain('```confluence-block');
+    expect(certified(storage)).toBe(true);
+  });
+});
+
+describe('a table inside a list item or a quote (D15)', () => {
+  const TABLE = '<table><tbody><tr><td colspan="2">alpha</td></tr></tbody></table>';
+
+  it('renders rather than becoming an opaque block', () => {
+    const storage = `<ul><li><p>step one</p>${TABLE}</li></ul>`;
+
+    expect(convert(storage)).not.toContain('```confluence-block');
+    expect(convert(storage)).toContain('<table>');
+    expect(certified(storage)).toBe(true);
+  });
+
+  it('does not swallow the paragraph that follows it', () => {
+    const storage = `<ul><li><p>step one</p>${TABLE}<p>after</p></li></ul>`;
+
+    expect(pushed(storage)).toContain('</table><p>after</p>');
+    expect(certified(storage)).toBe(true);
+  });
+
+  it('does not swallow a nested list that follows it', () => {
+    // The case that proves the trailing newline is necessary rather than tidy.
+    // Without it `- sub` is absorbed into the HTML block and reproduced as the
+    // literal text of a paragraph, and the sub-list is gone.
+    const storage = `<ul><li><p>step one</p>${TABLE}<ul><li>sub</li></ul></li></ul>`;
+
+    expect(pushed(storage)).toContain('<ul><li>sub</li></ul>');
+    expect(certified(storage)).toBe(true);
+  });
+
+  it('does not swallow the list item that follows it', () => {
+    const storage = `<ul><li>${TABLE}</li><li><p>second</p></li></ul>`;
+
+    expect(pushed(storage)).toContain('</li><li>second</li>');
+    expect(certified(storage)).toBe(true);
+  });
+
+  it('works inside a blockquote too', () => {
+    const storage = `<blockquote>${TABLE}<p>after</p></blockquote>`;
+
+    expect(convert(storage)).not.toContain('```confluence-block');
+    expect(pushed(storage)).toContain('</table><p>after</p>');
+    expect(certified(storage)).toBe(true);
+  });
+
+  it('adds no blank line under a table that is not indented', () => {
+    // Markdown already separates top-level blocks, so the extra newline would put
+    // a visible gap under every table on the pages where this already worked.
+    expect(convert(TABLE)).toBe(TABLE);
+  });
+
+  it('handles both defects at once', () => {
+    const storage =
+      '<ul><li><table><tbody><tr><td colspan="2"><p>a</p>\n\n<p>b</p></td></tr>' +
+      '</tbody></table><p>after</p></li></ul>';
+
+    expect(convert(storage)).not.toContain('```confluence-block');
+    expect(pushed(storage)).toContain('</table><p>after</p>');
+    expect(certified(storage)).toBe(true);
+  });
+});

@@ -339,3 +339,118 @@ describe('ConfluenceClient attachments (spec FR-8.1)', () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe('ConfluenceClient comments, labels and uploads (FR-9.1 to FR-9.3, FR-8.6)', () => {
+  it('expands labels on the same request as the body (FR-9.1)', async () => {
+    // A second request per page would double the cost of a full pull.
+    const { client, transport } = makeClient([
+      jsonResponse({
+        id: '1',
+        title: 'A',
+        body: { storage: { value: '<p>x</p>' } },
+        metadata: { labels: { results: [{ name: 'api' }] } },
+      }),
+    ]);
+
+    const result = await client.getPage('1');
+
+    expect(result.ok && result.value.labels).toEqual(['api']);
+    expect(transport.requests[0]?.url).toContain('metadata.labels');
+  });
+
+  it('asks for every comment, replies included (FR-9.3)', async () => {
+    const { client, transport } = makeClient([
+      jsonResponse({
+        results: [
+          {
+            id: 'c1',
+            body: { storage: { value: '<p>hi</p>' } },
+            history: { createdBy: { displayName: 'Jane' }, createdDate: '2026-08-09T14:03:11Z' },
+          },
+        ],
+      }),
+    ]);
+
+    const result = await client.listComments('1');
+
+    expect(result.ok && result.value[0]?.author).toBe('Jane');
+    // Without `depth=all` a discussion whose answer is a reply shows the question
+    // and not the answer.
+    expect(transport.requests[0]?.url).toContain('depth=all');
+    expect(transport.requests[0]?.url).toContain('body.storage');
+  });
+
+  it('adds a whole label set in one request (FR-9.2)', async () => {
+    const { client, transport } = makeClient([jsonResponse({ results: [] })]);
+
+    const result = await client.addLabels('1', ['api', 'architecture']);
+
+    expect(result.ok).toBe(true);
+    expect(transport.requests[0]?.method).toBe('POST');
+    expect(transport.requests[0]?.url).toBe(`${BASE_URL}/rest/api/content/1/label`);
+    expect(transport.requests[0]?.body).toBe(
+      JSON.stringify([
+        { prefix: 'global', name: 'api' },
+        { prefix: 'global', name: 'architecture' },
+      ]),
+    );
+  });
+
+  it('makes no request to add nothing', async () => {
+    const { client, transport } = makeClient([]);
+
+    expect((await client.addLabels('1', [])).ok).toBe(true);
+    expect(transport.requests).toEqual([]);
+  });
+
+  it('removes a label by query parameter, and accepts an empty response body', async () => {
+    // Confluence answers 204 with no body; decoding it as JSON would fail a request
+    // that succeeded.
+    const { client, transport } = makeClient([textResponse('', 204)]);
+
+    const result = await client.removeLabel('1', 'api');
+
+    expect(result.ok).toBe(true);
+    expect(transport.requests[0]?.method).toBe('DELETE');
+    expect(transport.requests[0]?.url).toContain('label?name=api');
+  });
+
+  it('uploads a file as multipart form data (FR-8.6)', async () => {
+    const { client, transport } = makeClient([
+      jsonResponse({
+        results: [{ id: 'att9', title: 'diagram.png', _links: { download: '/d/diagram.png' } }],
+      }),
+    ]);
+
+    const bytes = new ArrayBuffer(3);
+    new Uint8Array(bytes).set([1, 2, 3]);
+    const result = await client.uploadAttachment('1', 'diagram.png', bytes);
+
+    expect(result.ok && result.value.id).toBe('att9');
+
+    const request = transport.requests[0];
+    expect(request?.method).toBe('POST');
+    expect(request?.headers['Content-Type']).toContain('multipart/form-data; boundary=');
+    // Confluence rejects a form post without it.
+    expect(request?.headers['X-Atlassian-Token']).toBe('no-check');
+    expect(request?.body).toBeInstanceOf(ArrayBuffer);
+  });
+
+  it('reports an upload the server answered with nothing', async () => {
+    const { client } = makeClient([jsonResponse({ results: [] })]);
+
+    const bytes = new ArrayBuffer(1);
+    const result = await client.uploadAttachment('1', 'diagram.png', bytes);
+
+    expect(!result.ok && result.error.code).toBe('MALFORMED_RESPONSE');
+  });
+
+  it('refuses a file name that would inject a part header, without a request', async () => {
+    const { client, transport } = makeClient([]);
+
+    const result = await client.uploadAttachment('1', 'a"b.png', new ArrayBuffer(1));
+
+    expect(result.ok).toBe(false);
+    expect(transport.requests).toEqual([]);
+  });
+});

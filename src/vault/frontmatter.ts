@@ -36,6 +36,26 @@ export const ALIASES_KEY = 'aliases';
  */
 export const CONFLICT_COPY_KEY = 'confluenceRemoteCopy';
 
+/**
+ * Obsidian's own tag key, which the plugin *shares* the way it shares `aliases`:
+ * it maintains the entries standing for the page's Confluence labels (FR-9.1) and
+ * leaves every other entry alone.
+ */
+export const TAGS_KEY = 'tags';
+
+/**
+ * Suppresses the managed comments region for one note (spec FR-9.6, §16 O5).
+ *
+ * A third reserved key, and the only place a per-page opt-out can live: FR-9.4
+ * regenerates the region wholesale on every pull, so anything recorded inside it
+ * is gone by the next sync, and frontmatter is the one part of the note that
+ * survives. `false` silences comments for this note; absent or `true` leaves the
+ * decision to the subscription's own switch (FR-9.5). It never turns comments
+ * *on* against that switch — a user who disabled them for a whole space did so
+ * for a reason.
+ */
+export const COMMENTS_KEY = 'confluenceComments';
+
 export type Fidelity = 'certified' | 'degraded';
 
 /** Portable page identity, per spec §6.5.1. */
@@ -198,6 +218,73 @@ export function applyAlias(
   // a mirror is noise the user did not ask for.
   if (aliases.length === 0) delete frontmatter[ALIASES_KEY];
   else frontmatter[ALIASES_KEY] = aliases;
+}
+
+/**
+ * Reads `tags`, which Obsidian accepts as a list or as one string.
+ *
+ * A numeric entry is read back as text: YAML turns an unquoted `2026` into a
+ * number, and a release label of `2026` is still the label Confluence holds.
+ */
+export function readTags(frontmatter: unknown): readonly string[] {
+  if (!isRecord(frontmatter)) return [];
+  const value = frontmatter[TAGS_KEY];
+
+  if (typeof value === 'string') {
+    return value
+      .split(/[\s,]+/)
+      .map((tag) => tag.replace(/^#/, ''))
+      .filter((tag) => tag.length > 0);
+  }
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((entry) => {
+    if (typeof entry === 'string') return entry.length === 0 ? [] : [entry.replace(/^#/, '')];
+    return typeof entry === 'number' && Number.isFinite(entry) ? [String(entry)] : [];
+  });
+}
+
+/**
+ * Maintains the tags standing for the page's labels (FR-9.1).
+ *
+ * `next` is the page's current label set and `previous` is the set written last
+ * time — the only entries this function may remove. Every other tag is the user's
+ * (§6.5.1), including one that happens to match a label: it is compared
+ * case-insensitively and left in place rather than replaced by Confluence's
+ * lower-cased spelling of the same word.
+ *
+ * Mutates, because that is the contract of `processFrontMatter` — the only
+ * sanctioned way to touch frontmatter (§7.4).
+ */
+export function applyTags(
+  frontmatter: Record<string, unknown>,
+  next: readonly string[],
+  previous: readonly string[],
+): void {
+  const fold = (tag: string): string => tag.toLowerCase();
+  const dropped = new Set(previous.map(fold));
+
+  const kept = readTags(frontmatter).filter((tag) => !dropped.has(fold(tag)));
+  const present = new Set(kept.map(fold));
+  const tags = [...kept, ...next.filter((tag) => !present.has(fold(tag)))];
+
+  // An empty list is deleted rather than written: `tags: []` in every note of a
+  // mirror is noise the user did not ask for.
+  if (tags.length === 0) delete frontmatter[TAGS_KEY];
+  else frontmatter[TAGS_KEY] = tags;
+}
+
+/**
+ * Whether this note has opted out of the comments region (FR-9.6).
+ *
+ * Only an explicit `false` counts. The string form is accepted too, because the
+ * key is meant to be typed by hand and a quoted `"false"` is what a careful user
+ * writes when they are unsure how YAML treats booleans.
+ */
+export function commentsDisabled(frontmatter: unknown): boolean {
+  if (!isRecord(frontmatter)) return false;
+  const value = frontmatter[COMMENTS_KEY];
+  return value === false || value === 'false';
 }
 
 /** Frontmatter block plus body, as split by `splitFrontmatter`. */

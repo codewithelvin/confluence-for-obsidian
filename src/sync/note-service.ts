@@ -2,17 +2,16 @@ import type { ConfluenceGateway } from '../api/confluence-client';
 import type { FragmentMap } from '../convert/types';
 import type { SettingsStore } from '../settings/settings-store';
 import type { ConnectionProfile, Subscription } from '../settings/settings-types';
-import type { AppError } from '../util/errors';
+import { AppError } from '../util/errors';
 import { sha256 } from '../util/hash';
 import type { Logger } from '../util/logger';
 import { err, type Result } from '../util/result';
 import { parentPath, type VaultGateway } from '../vault/vault-gateway';
-import { attachmentHook } from './attachment-executor';
 import type { BackupStore } from './backup-store';
 import type { FragmentStore } from './fragment-store';
-import { LinkIndex, mirroredPages } from './link-index';
 import { locateNote, subscriptionFor } from './note-locator';
-import { pullSinglePage, type ExecutorDeps } from './pull-executor';
+import { pullSinglePage } from './pull-executor';
+import { singlePageExecutor } from './single-page-deps';
 import type { PageState, SyncStateStore } from './sync-state';
 
 /**
@@ -93,11 +92,60 @@ export class NoteService {
     const backed = await this.backUpIfModified(notePath, previous);
     if (backed !== null) return err(backed);
 
-    const pulled = await pullSinglePage(this.executorFor(subscription, connection), pageId, {
-      path: notePath,
-      isFolderNote: previous?.isFolderNote ?? isFolderNotePath(notePath),
-      alias: previous?.alias ?? null,
-    });
+    const pulled = await pullSinglePage(
+      singlePageExecutor(this.deps, subscription, connection, this.deps.createClient(connection)),
+      pageId,
+      {
+        path: notePath,
+        isFolderNote: previous?.isFolderNote ?? isFolderNotePath(notePath),
+        alias: previous?.alias ?? null,
+        labels: previous?.labels ?? [],
+      },
+    );
+    if (!pulled.ok) return pulled;
+
+    await this.record(subscription.id, pulled.value);
+    return pulled;
+  }
+
+  /**
+   * Writes an orphan's note back from Confluence (spec FR-7.4).
+   *
+   * Distinct from `pullPage`, which starts from a file: an orphan has no file, so
+   * there is no frontmatter to read an identity out of and nothing to back up. The
+   * recorded path, folder-note shape and alias are taken from the index, which still
+   * remembers all three from the sync that wrote the note in the first place.
+   */
+  async restoreOrphan(
+    subscription: Subscription,
+    pageId: string,
+  ): Promise<Result<PageState, AppError>> {
+    const connection = this.deps.settings
+      .get()
+      .connections.find((candidate) => candidate.id === subscription.connectionId);
+    if (connection === undefined) {
+      return err(
+        new AppError('CREDENTIALS_UNAVAILABLE', 'That connection no longer exists.', {
+          action: 'open-settings',
+        }),
+      );
+    }
+
+    const previous = this.deps.state.forSubscription(subscription.id).pages[pageId];
+    if (previous === undefined) {
+      return err(new AppError('NOT_FOUND', 'That page is no longer in the sync index.'));
+    }
+
+    const pulled = await pullSinglePage(
+      singlePageExecutor(this.deps, subscription, connection, this.deps.createClient(connection)),
+      pageId,
+      {
+        path: previous.localPath,
+        isFolderNote: previous.isFolderNote,
+        alias: previous.alias,
+        labels: previous.labels,
+      },
+    );
     if (!pulled.ok) return pulled;
 
     await this.record(subscription.id, pulled.value);
@@ -125,46 +173,6 @@ export class NoteService {
 
     const saved = await this.deps.backups.save(notePath, content.value);
     return saved.ok ? null : saved.error;
-  }
-
-  /**
-   * Executor dependencies for a single-page pull.
-   *
-   * Link resolution spans *every* subscription, its own included: a single-page
-   * pull recomputes no paths, so the index is exactly right about all of them.
-   */
-  private executorFor(subscription: Subscription, connection: ConnectionProfile): ExecutorDeps {
-    const client = this.deps.createClient(connection);
-    const linkIndex = new LinkIndex(
-      mirroredPages(this.deps.settings.get().subscriptions, (id) =>
-        this.deps.state.forSubscription(id),
-      ),
-    );
-    const settings = this.deps.settings.get();
-
-    return {
-      client,
-      vault: this.deps.vault,
-      fragments: this.deps.fragments,
-      logger: this.deps.logger,
-      baseUrl: connection.baseUrl,
-      strictMarkup: connection.strictMarkup,
-      resolveTarget: linkIndex.resolveTarget,
-      resolveVaultPath: linkIndex.resolveVaultPath,
-      attachments: attachmentHook(
-        {
-          client,
-          vault: this.deps.vault,
-          logger: this.deps.logger,
-          mountPath: subscription.mountPath,
-          sizeLimitBytes: settings.attachmentSizeLimitMb * 1_048_576,
-          referencedOnly: settings.attachmentsReferencedOnly,
-        },
-        (pageId) =>
-          this.deps.state.forSubscription(subscription.id).pages[pageId]?.attachments ?? {},
-      ),
-      now: this.deps.now,
-    };
   }
 
   private async record(subscriptionId: string, page: PageState): Promise<void> {

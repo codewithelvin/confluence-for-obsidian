@@ -59,6 +59,17 @@ export interface PageState {
    * like EP, which has thousands.
    */
   readonly attachments: Readonly<Record<string, AttachmentState>>;
+  /**
+   * Confluence labels as last written into the note's `tags` (spec FR-9.1).
+   *
+   * Two jobs, and both need the *recorded* set rather than a live reading. On pull
+   * it is the only tags the plugin may remove — everything else in `tags` is the
+   * user's (§6.5.1). On push it is what the user's current tags are diffed against,
+   * which is what makes FR-9.2 mean "what the user changed" rather than "everything
+   * that differs from the page": a note recorded before labels were synced has none,
+   * so its first push adds tags and removes nothing.
+   */
+  readonly labels: readonly string[];
 }
 
 export interface AttachmentState {
@@ -130,7 +141,20 @@ function parsePageState(raw: unknown): PageState | null {
     fidelity: raw['fidelity'] === 'degraded' ? 'degraded' : 'certified',
     lastSyncedAt: asString(raw['lastSyncedAt']) ?? '',
     attachments: parseAttachments(raw['attachments']),
+    labels: parseLabels(raw['labels']),
   };
+}
+
+/**
+ * Reads the recorded label set.
+ *
+ * An unreadable record degrades to none, which is the safe direction in both
+ * places it is used: the pull then removes no tag it did not put there, and the
+ * push adds the user's tags without deleting anything.
+ */
+function parseLabels(raw: unknown): readonly string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
 }
 
 function parseSubscriptionState(raw: unknown): SubscriptionState {

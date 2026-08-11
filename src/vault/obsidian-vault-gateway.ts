@@ -6,11 +6,14 @@ import { sha256 } from '../util/hash';
 import { err, ok, type Result } from '../util/result';
 import {
   applyAlias,
+  applyTags,
+  commentsDisabled,
   CONFLICT_COPY_KEY,
   CONFLUENCE_KEY,
   isConflictCopy,
   joinFrontmatter,
   readIdentity,
+  readTags,
   splitFrontmatter,
   toConflictCopyValue,
   toFrontmatterValue,
@@ -63,7 +66,40 @@ export class ObsidianVaultGateway implements VaultGateway {
   readIdentity(path: string): ConfluenceIdentity | null {
     const file = this.app.vault.getFileByPath(normalizePath(path));
     if (file === null) return null;
-    return readIdentity(this.app.metadataCache.getFileCache(file)?.frontmatter);
+    return readIdentity(this.frontmatterOf(path));
+  }
+
+  readTags(path: string): readonly string[] {
+    return readTags(this.frontmatterOf(path));
+  }
+
+  commentsDisabled(path: string): boolean {
+    return commentsDisabled(this.frontmatterOf(path));
+  }
+
+  /** Parsed frontmatter for a note, or `undefined` when there is none to read. */
+  private frontmatterOf(path: string): Record<string, unknown> | undefined {
+    const file = this.app.vault.getFileByPath(normalizePath(path));
+    if (file === null) return undefined;
+    return this.app.metadataCache.getFileCache(file)?.frontmatter;
+  }
+
+  resolveEmbed(path: string, fromNote: string): string | null {
+    return this.app.metadataCache.getFirstLinkpathDest(path, normalizePath(fromNote))?.path ?? null;
+  }
+
+  async readBinary(path: string): Promise<Result<ArrayBuffer, AppError>> {
+    const normalised = normalizePath(path);
+    const file = this.app.vault.getFileByPath(normalised);
+    if (file === null) {
+      return err(new AppError('NOT_FOUND', `There is no file at "${normalised}".`));
+    }
+
+    try {
+      return ok(await this.app.vault.readBinary(file));
+    } catch (cause) {
+      return err(vaultWriteFailed(normalised, cause));
+    }
   }
 
   vaultPathLength(): number {
@@ -139,6 +175,7 @@ export class ObsidianVaultGateway implements VaultGateway {
         (frontmatter: Record<string, unknown>) => {
           frontmatter[CONFLUENCE_KEY] = toFrontmatterValue(write.identity);
           applyAlias(frontmatter, write.alias, write.previousAlias);
+          applyTags(frontmatter, write.tags, write.previousTags);
         },
       );
       return ok(await this.app.vault.read(file));
@@ -150,6 +187,7 @@ export class ObsidianVaultGateway implements VaultGateway {
   async updateIdentity(
     path: string,
     identity: ConfluenceIdentity,
+    alias?: { readonly next: string | null; readonly previous: string | null },
   ): Promise<Result<string, AppError>> {
     const normalised = normalizePath(path);
     const guard = this.guard(normalised);
@@ -165,12 +203,28 @@ export class ObsidianVaultGateway implements VaultGateway {
         file,
         (frontmatter: Record<string, unknown>) => {
           frontmatter[CONFLUENCE_KEY] = toFrontmatterValue(identity);
+          if (alias !== undefined) applyAlias(frontmatter, alias.next, alias.previous);
         },
       );
       return ok(await this.app.vault.read(file));
     } catch (cause) {
       return err(vaultWriteFailed(normalised, cause));
     }
+  }
+
+  /**
+   * Finds a tracked page's note anywhere in the vault (spec FR-7.7).
+   *
+   * Reads frontmatter through the metadata cache, which Obsidian keeps in memory, so
+   * this is a map lookup per note rather than a read per note.
+   */
+  locateIdentity(pageId: string): string | null {
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      if (isConflictCopy(frontmatter)) continue;
+      if (readIdentity(frontmatter)?.id === pageId) return file.path;
+    }
+    return null;
   }
 
   async writeConflictCopy(

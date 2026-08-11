@@ -8,10 +8,12 @@
 import type {
   ConfluenceGateway,
   ConnectionCheck,
+  PageCreation,
   PageUpdate,
 } from '../../src/api/confluence-client';
 import type {
   ConfluenceAttachment,
+  ConfluenceComment,
   ConfluencePage,
   ConfluencePageRef,
   ConfluencePageVersion,
@@ -78,8 +80,15 @@ export class FakeVaultGateway implements VaultGateway {
     this.files.set(write.path, content);
     this.identities.set(write.path, write.identity);
     this.writes.push(write.path);
+    this.noteWrites.push(write);
+    // The real gateway merges labels into `tags` through `applyTags`; recording them
+    // is what lets a sync test read back what the note would then hold.
+    this.tags.set(write.path, write.tags);
     return Promise.resolve(ok(content));
   }
+
+  /** Every note write in full, for assertions about tags and aliases. */
+  readonly noteWrites: NoteWrite[] = [];
 
   /**
    * Rewrites the identity block and leaves the body alone, as the real gateway
@@ -183,6 +192,53 @@ export class FakeVaultGateway implements VaultGateway {
     return this.identities.get(path) ?? null;
   }
 
+  /** Tags per note, as the metadata cache would report them (FR-9.2). */
+  readonly tags = new Map<string, readonly string[]>();
+  /** Notes carrying the FR-9.6 opt-out. */
+  readonly commentsOptOut = new Set<string>();
+  /** Embed target -> vault path, standing in for Obsidian's link resolution. */
+  readonly embedTargets = new Map<string, string>();
+
+  readTags(path: string): readonly string[] {
+    return this.tags.get(path) ?? [];
+  }
+
+  /**
+   * Where a page's note is, vault-wide (FR-7.7).
+   *
+   * Searches every seeded file, including ones outside any mount — which is the whole
+   * point of the method: it is how a deleted note is told from a moved one.
+   */
+  locateIdentity(pageId: string): string | null {
+    for (const [path, identity] of this.identities) {
+      if (identity.id === pageId && !this.conflictCopies.has(path)) return path;
+    }
+    return null;
+  }
+
+  commentsDisabled(path: string): boolean {
+    return this.commentsOptOut.has(path);
+  }
+
+  resolveEmbed(path: string): string | null {
+    // A seeded mapping first, then the path as written — which is what the real
+    // resolver does for the full vault-relative paths the converter produces.
+    return (
+      this.embedTargets.get(path) ?? (this.binaries.has(path) || this.files.has(path) ? path : null)
+    );
+  }
+
+  readBinary(path: string): Promise<Result<ArrayBuffer, AppError>> {
+    const bytes = this.binaries.get(path);
+    if (bytes === undefined) {
+      return Promise.resolve(err(new AppError('NOT_FOUND', `There is no file at "${path}".`)));
+    }
+
+    const buffer = new ArrayBuffer(bytes.length);
+    new Uint8Array(buffer).set(bytes);
+    return Promise.resolve(ok(buffer));
+  }
+
   vaultPathLength(): number {
     return this.vaultLength;
   }
@@ -240,6 +296,8 @@ export interface FakePage {
   readonly parentId?: string | null;
   readonly version?: number;
   readonly storage?: string;
+  /** Labels the page carries (FR-9.1). */
+  readonly labels?: readonly string[];
 }
 
 export class FakeConfluence implements ConfluenceGateway {
@@ -315,7 +373,79 @@ export class FakeConfluence implements ConfluenceGateway {
     if (page === undefined) {
       return Promise.resolve(err(new AppError('NOT_FOUND', `no page ${id}`)));
     }
-    return Promise.resolve(ok({ ...this.toRef(page), storage: page.storage ?? '<p>body</p>' }));
+    return Promise.resolve(
+      ok({
+        ...this.toRef(page),
+        storage: page.storage ?? '<p>body</p>',
+        labels: this.labels.get(id) ?? page.labels ?? [],
+      }),
+    );
+  }
+
+  /**
+   * Labels per page id, and every label call made against it (FR-9.2).
+   *
+   * The map is the page's live label set: `addLabels` and `removeLabel` change it,
+   * so a test can assert on the end state rather than only on the calls.
+   */
+  readonly labels = new Map<string, readonly string[]>();
+  readonly labelCalls: { readonly kind: 'add' | 'remove'; readonly names: string[] }[] = [];
+  labelError: AppError | null = null;
+
+  addLabels(pageId: string, labels: readonly string[]): Promise<Result<void, AppError>> {
+    if (labels.length === 0) return Promise.resolve(ok(undefined));
+    this.labelCalls.push({ kind: 'add', names: [...labels] });
+    if (this.labelError !== null) return Promise.resolve(err(this.labelError));
+
+    this.labels.set(pageId, [...(this.labels.get(pageId) ?? []), ...labels]);
+    return Promise.resolve(ok(undefined));
+  }
+
+  removeLabel(pageId: string, label: string): Promise<Result<void, AppError>> {
+    this.labelCalls.push({ kind: 'remove', names: [label] });
+    if (this.labelError !== null) return Promise.resolve(err(this.labelError));
+
+    this.labels.set(
+      pageId,
+      (this.labels.get(pageId) ?? []).filter((name) => name !== label),
+    );
+    return Promise.resolve(ok(undefined));
+  }
+
+  /** Comments per page id, for the FR-9.3 managed region. */
+  readonly comments = new Map<string, ConfluenceComment[]>();
+  commentError: AppError | null = null;
+
+  listComments(pageId: string): Promise<Result<ConfluenceComment[], AppError>> {
+    if (this.commentError !== null) return Promise.resolve(err(this.commentError));
+    return Promise.resolve(ok(this.comments.get(pageId) ?? []));
+  }
+
+  /** Files uploaded by the push path (FR-8.6), in order. */
+  readonly uploads: {
+    readonly pageId: string;
+    readonly filename: string;
+    readonly bytes: number;
+  }[] = [];
+  uploadError: AppError | null = null;
+
+  uploadAttachment(
+    pageId: string,
+    filename: string,
+    bytes: ArrayBuffer,
+  ): Promise<Result<ConfluenceAttachment, AppError>> {
+    this.uploads.push({ pageId, filename, bytes: bytes.byteLength });
+    if (this.uploadError !== null) return Promise.resolve(err(this.uploadError));
+
+    const attachment: ConfluenceAttachment = {
+      id: `att-${filename}`,
+      filename,
+      version: 1,
+      size: bytes.byteLength,
+      downloadPath: `/download/attachments/${pageId}/${filename}`,
+    };
+    this.attachments.set(pageId, [...(this.attachments.get(pageId) ?? []), attachment]);
+    return Promise.resolve(ok(attachment));
   }
 
   /** Every page update the push path attempted, in order. */
@@ -362,6 +492,48 @@ export class FakeConfluence implements ConfluenceGateway {
         updatedBy: 'tester',
       }),
     );
+  }
+
+  /** Pages created through FR-7.1, and pages trashed through FR-7.3. */
+  readonly created: PageCreation[] = [];
+  readonly deleted: string[] = [];
+  createError: AppError | null = null;
+  deleteError: AppError | null = null;
+  private nextId = 900;
+
+  createPage(creation: PageCreation): Promise<Result<ConfluencePageVersion, AppError>> {
+    this.created.push(creation);
+    if (this.createError !== null) return Promise.resolve(err(this.createError));
+
+    this.nextId += 1;
+    const id = String(this.nextId);
+    // Added to the fake's own tree, so a test can sync afterwards and see the page
+    // the way a later sync would.
+    this.pages.push({
+      id,
+      title: creation.title,
+      parentId: creation.parentId,
+      version: 1,
+      storage: creation.storage,
+    });
+
+    return Promise.resolve(
+      ok({
+        id,
+        title: creation.title,
+        version: 1,
+        updatedAt: '2026-08-11T09:00:00Z',
+        updatedBy: 'tester',
+      }),
+    );
+  }
+
+  deletePage(pageId: string): Promise<Result<void, AppError>> {
+    this.deleted.push(pageId);
+    if (this.deleteError !== null) return Promise.resolve(err(this.deleteError));
+
+    this.pages = this.pages.filter((page) => page.id !== pageId);
+    return Promise.resolve(ok(undefined));
   }
 
   private toRef(page: FakePage): ConfluencePageRef {

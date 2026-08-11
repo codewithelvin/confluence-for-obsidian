@@ -29,6 +29,14 @@ export interface PullItem {
   readonly alias: string | null;
   /** Alias written last time, so a retitled page does not leave a stale one behind. */
   readonly previousAlias: string | null;
+  /**
+   * Labels written into `tags` last time (FR-9.1).
+   *
+   * Carried on the item for the same reason `previousAlias` is: the executor
+   * writes notes and must not also be the thing that reads the index, or the two
+   * disagree about what the plugin owns and it starts removing the user's tags.
+   */
+  readonly previousLabels: readonly string[];
 }
 
 export interface MoveOp {
@@ -176,6 +184,7 @@ function classifyTracked(
       isNew: false,
       alias: mapped.aliasTitle,
       previousAlias: previous.alias,
+      previousLabels: previous.labels,
     });
     return false;
   }
@@ -232,6 +241,7 @@ export function buildPullPlan(input: PlanInput): PullPlan {
         isNew: true,
         alias: mapped.aliasTitle,
         previousAlias: null,
+        previousLabels: [],
       });
       continue;
     }

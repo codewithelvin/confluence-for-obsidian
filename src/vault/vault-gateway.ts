@@ -23,6 +23,10 @@ export interface NoteWrite {
   readonly alias: string | null;
   /** Alias written on the previous sync — the only entry the plugin may remove. */
   readonly previousAlias: string | null;
+  /** The page's Confluence labels, merged into `tags` (FR-9.1). */
+  readonly tags: readonly string[];
+  /** Labels written last sync — the only tags the plugin may remove. */
+  readonly previousTags: readonly string[];
 }
 
 /** What a scan of the mount found for one Markdown file. */
@@ -74,7 +78,19 @@ export interface VaultGateway {
    * has moved on. Writing the whole note instead would replace what the user
    * wrote with the converter's idea of it.
    */
-  updateIdentity(path: string, identity: ConfluenceIdentity): Promise<Result<string, AppError>>;
+  updateIdentity(
+    path: string,
+    identity: ConfluenceIdentity,
+    /**
+     * The plugin's title alias, when a structural change has made the current one
+     * stale (FR-4.11, FR-7.6).
+     *
+     * Omitted on an ordinary push, where the title has not moved and the alias is
+     * still right. `next: null` removes it — which is what a rename to the true
+     * title means, since the file name now *is* the title.
+     */
+    alias?: { readonly next: string | null; readonly previous: string | null },
+  ): Promise<Result<string, AppError>>;
 
   /**
    * Writes the read-only snapshot a "Save Both" resolution keeps (FR-6.4).
@@ -116,6 +132,52 @@ export interface VaultGateway {
 
   /** The plugin-owned identity in a note's frontmatter, or `null` if it has none. */
   readIdentity(path: string): ConfluenceIdentity | null;
+
+  /**
+   * A note's frontmatter tags, as Obsidian parsed them (spec FR-9.2).
+   *
+   * Read through the metadata cache rather than from the file the push path
+   * already has in hand, so the plugin never parses YAML of its own (§7.4) — the
+   * one place quoting, list style and numeric coercion can be got wrong.
+   */
+  readTags(path: string): readonly string[];
+
+  /** Whether this note carries the FR-9.6 opt-out from the comments region. */
+  commentsDisabled(path: string): boolean;
+
+  /**
+   * Where in the vault a tracked page's note has ended up, or `null` if nowhere
+   * (spec FR-7.7).
+   *
+   * Searched vault-wide, not inside the mount: this exists precisely to tell a note
+   * the user *deleted* from one they dragged somewhere the plugin does not manage.
+   * Reporting the second as an orphan would invite them to restore a file that is
+   * sitting in front of them, or to delete the page it still belongs to.
+   *
+   * Called only for pages a sync has already found missing, so the vault-wide walk
+   * costs nothing on a sync where nothing went missing.
+   */
+  locateIdentity(pageId: string): string | null;
+
+  /**
+   * The vault path an embed in `fromNote` points at, or `null` if it resolves to
+   * nothing (spec FR-8.6).
+   *
+   * Resolution is Obsidian's, not the plugin's: `![[diagram.png]]` is a link text
+   * the host resolves against the whole vault and the note's own folder, and any
+   * other answer would be a second, disagreeing one.
+   */
+  resolveEmbed(path: string, fromNote: string): string | null;
+
+  /**
+   * A file's bytes, for uploading what a note embeds (spec FR-8.6).
+   *
+   * Deliberately not containment-checked. §6.3's rule bounds where the plugin
+   * *writes*; an embed the user typed may legitimately point at their own
+   * attachments folder outside the mount, and refusing to read it would publish a
+   * page whose picture is missing.
+   */
+  readBinary(path: string): Promise<Result<ArrayBuffer, AppError>>;
 
   /** Absolute path length of the vault root, for the §6.5.3 path budget. */
   vaultPathLength(): number;

@@ -8,8 +8,14 @@
  *    equal regardless of attribute order or insignificant whitespace.
  */
 
-/** Elements whose text content is significant and must never be collapsed. */
-const WHITESPACE_PRESERVING = new Set([
+/**
+ * Elements whose text content is significant and must never be collapsed.
+ *
+ * Exported because the D15 table projection needs the same answer: it may rewrite
+ * insignificant whitespace to keep an HTML block intact, but inside one of these
+ * the whitespace *is* the content.
+ */
+export const WHITESPACE_PRESERVING = new Set([
   'pre',
   'code',
   'ac:plain-text-body',

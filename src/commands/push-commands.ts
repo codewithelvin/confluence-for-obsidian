@@ -90,11 +90,14 @@ function announce(report: PushReport, label: string): void {
   const parts = [`${String(report.pushed.length)} pushed`];
   if (report.skipped > 0) parts.push(`${String(report.skipped)} unchanged`);
   if (report.blocked.length > 0) parts.push(`${String(report.blocked.length)} blocked`);
+  // Named separately from `blocked`: these pages *are* published, and a label that
+  // did not apply must not read as a page that failed to (FR-9.2).
+  if (report.warnings.length > 0) parts.push(`${String(report.warnings.length)} label warning(s)`);
 
   const resolved = report.conflicts.filter((outcome) => outcome.choice !== 'skip').length;
   if (resolved > 0) parts.push(`${String(resolved)} conflict(s) resolved`);
 
-  const problems = report.blocked.length + report.conflicts.length;
+  const problems = report.blocked.length + report.conflicts.length + report.warnings.length;
   new Notice(
     `${label}: ${parts.join(', ')}` + (problems === 0 ? '.' : ' — see the sync panel for details.'),
     problems === 0 ? 5000 : 12_000,

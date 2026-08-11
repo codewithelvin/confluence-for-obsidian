@@ -39,6 +39,7 @@ function pageState(extra: Partial<PageState> = {}): PageState {
     storageHash: 'storage',
     fidelity: 'certified',
     lastSyncedAt: '2026-08-10T12:00:00Z',
+    labels: [],
     ...extra,
   };
 }
