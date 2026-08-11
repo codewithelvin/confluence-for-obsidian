@@ -1,4 +1,5 @@
-import { isDefaultColourSpan, parseStorage, riAttr } from './storage-parser';
+import { discardInvisibleMarkup } from './discard';
+import { parseStorage, riAttr } from './storage-parser';
 import { CANONICAL, serialiseChildren } from './storage-serialiser';
 
 /**
@@ -24,6 +25,12 @@ export function normaliseMarkdown(markdown: string): string {
 }
 
 export interface NormaliseOptions {
+  /**
+   * Compare byte-faithfully: skip the §6.4.6 pass and every equivalence claim,
+   * leaving only the mechanical rules (FR-4.12). Must match the flag the
+   * conversion ran under, or certification stops meaning anything.
+   */
+  readonly strictMarkup?: boolean;
   /**
    * Space of the page being compared. A same-space `ri:page` link may omit
    * `ri:space-key` in Confluence but is always written back with it, and the two
@@ -64,26 +71,6 @@ function unwrapSoleParagraphs(root: Element): void {
       host.insertBefore(paragraph.firstChild, paragraph);
     }
     host.removeChild(paragraph);
-  }
-}
-
-/**
- * Removes `<span>` wrappers that carry no formatting.
- *
- * Confluence's editor leaves bare `<span>` elements around fragments of text,
- * and wraps ordinary prose in `<span style="color: rgb(0,0,0);">` — black text
- * marked black. Both render identically to their contents and Confluence
- * accepts either form, so treating them as content would make pages read-only
- * over markup that means nothing.
- */
-function unwrapMeaninglessSpans(root: Element): void {
-  for (const span of Array.from(root.querySelectorAll('span'))) {
-    if (span.attributes.length > 0 && !isDefaultColourSpan(span)) continue;
-    const parent = span.parentNode;
-    if (parent === null) continue;
-
-    while (span.firstChild !== null) parent.insertBefore(span.firstChild, span);
-    parent.removeChild(span);
   }
 }
 
@@ -138,9 +125,13 @@ export function normaliseStorage(xhtml: string, options: NormaliseOptions = {}):
     return xhtml.replace(/\s+/g, ' ').trim();
   }
 
-  unwrapMeaninglessSpans(parsed.value);
-  unwrapSoleParagraphs(parsed.value);
-  canonicaliseNestedEmphasis(parsed.value);
+  // The equivalence claims of §6.4.5, in the same order on both sides of every
+  // comparison. Strict markup keeps only the mechanical rules below.
+  if (options.strictMarkup !== true) {
+    discardInvisibleMarkup(parsed.value);
+    unwrapSoleParagraphs(parsed.value);
+    canonicaliseNestedEmphasis(parsed.value);
+  }
 
   if (options.defaultSpaceKey !== undefined) {
     applyDefaultSpaceKey(parsed.value, options.defaultSpaceKey);

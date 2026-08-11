@@ -126,26 +126,16 @@ export function childrenOf(node: Node): readonly Node[] {
 }
 
 /**
- * A colour declaration that only restates the colour body text already has.
+ * Whether the element or anything inside it is `ac:`- or `ri:`-namespaced.
  *
- * Deliberately narrow: the whole `style` attribute must be this and nothing
- * else. A span that also sets a background, a size or a font is carrying real
- * formatting and must still be preserved.
+ * Namespaced markup must never be written into a note (FR-4.9): Obsidian renders
+ * an unknown tag as nothing at all, so leaking one *hides* the content it was
+ * supposed to preserve. Any construct that would otherwise be emitted as raw
+ * HTML has to be checked against this first.
  */
-const DEFAULT_COLOUR = /^\s*color:\s*rgb\(\s*0\s*,\s*0\s*,\s*0\s*\)\s*;?\s*$/i;
-
-/**
- * Whether a `<span>`'s only effect is to state that black text is black.
- *
- * Confluence's editor scatters `<span style="color: rgb(0,0,0);">` through
- * ordinary prose — on one real page, 406 of 667 preserved fragments were this
- * one wrapper and its closing tag. It renders identically to its contents and
- * Confluence accepts either form, so it is serialisation rather than content:
- * the same reasoning that already unwraps an attribute-less span.
- */
-export function isDefaultColourSpan(element: Element): boolean {
-  if (tagOf(element) !== 'span' || element.attributes.length !== 1) return false;
-
-  const style = element.getAttribute('style');
-  return style !== null && DEFAULT_COLOUR.test(style);
+export function hasNamespacedMarkup(element: Element): boolean {
+  if (tagOf(element).includes(':')) return true;
+  return Array.from(element.getElementsByTagName('*')).some((descendant) =>
+    tagOf(descendant).includes(':'),
+  );
 }

@@ -1,7 +1,18 @@
-import type { Blockquote, BlockContent, Code, List, ListItem, RootContent, Table } from 'mdast';
+import type {
+  Blockquote,
+  BlockContent,
+  Code,
+  List,
+  ListItem,
+  PhrasingContent,
+  RootContent,
+  Table,
+  TableCell,
+} from 'mdast';
 import { isParamsOnly, parseMacroParams } from './macro-params';
 import { BLOCK_FENCE_LANGUAGE, readBlockPlaceholderId } from './placeholder-registry';
 import { escapeText } from './storage-serialiser';
+import { ROW_HEADER_MARKER } from './storage-tables';
 import type { ReverseContext } from './types';
 
 /**
@@ -128,10 +139,21 @@ function blockquoteToStorage(node: Blockquote, ctx: ReverseContext): string {
   );
 }
 
+/**
+ * A list item's inner storage markup.
+ *
+ * The paragraph wrapper is dropped only when the paragraph is the item's *whole*
+ * content, because that is exactly the case §6.4.5 declares equivalent —
+ * `<li><p>x</p></li>` and `<li>x</li>` render identically and Confluence writes
+ * both. An item that also holds a nested list or a table keeps its `<p>`: without
+ * that, every step-with-sub-steps in a specification page reproduced as
+ * `<li>Step<ul>…` against an original of `<li><p>Step</p><ul>…`, and the page
+ * went read-only over a wrapper nobody can see.
+ */
 function listItemContent(item: ListItem, ctx: ReverseContext): string {
-  const [first, ...rest] = item.children;
-  if (first?.type === 'paragraph') {
-    return ctx.phrasing(first.children) + ctx.blocks(rest);
+  const [first] = item.children;
+  if (item.children.length === 1 && first?.type === 'paragraph') {
+    return ctx.phrasing(first.children);
   }
   return ctx.blocks(item.children);
 }
@@ -173,12 +195,31 @@ function listToStorage(node: List, ctx: ReverseContext): string {
   return `<${tag}>${items}</${tag}>`;
 }
 
+/**
+ * Splits the row-header marker off a cell.
+ *
+ * The forward pass appends `<!--cf-th-->` to a `<th>` that sat outside the header
+ * row, because GFM cannot mark one. Reading it back is what makes such a table
+ * reproducible — and Confluence's specification tables label their first column
+ * that way in row after row, so without it those pages were all read-only.
+ */
+function readRowHeader(cell: TableCell): { children: readonly PhrasingContent[]; header: boolean } {
+  const last = cell.children[cell.children.length - 1];
+  if (last?.type !== 'html' || last.value.trim() !== ROW_HEADER_MARKER) {
+    return { children: cell.children, header: false };
+  }
+  return { children: cell.children.slice(0, -1), header: true };
+}
+
 function tableToStorage(node: Table, ctx: ReverseContext): string {
   const rows = node.children
     .map((row, index) => {
-      const tag = index === 0 ? 'th' : 'td';
       const cells = row.children
-        .map((cell) => `<${tag}>${ctx.phrasing(cell.children)}</${tag}>`)
+        .map((cell) => {
+          const { children, header } = readRowHeader(cell);
+          const tag = index === 0 || header ? 'th' : 'td';
+          return `<${tag}>${ctx.phrasing(children)}</${tag}>`;
+        })
         .join('');
       return `<tr>${cells}</tr>`;
     })

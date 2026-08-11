@@ -31,10 +31,9 @@ export function markdownToStorage(
   const root = parser.parse(markdown);
 
   const context: ReverseContext = {
+    ...options,
     fragments,
     source: markdown,
-    baseUrl: options.baseUrl,
-    spaceKey: options.spaceKey,
     missingFragments: new Set<string>(),
     unsupported: new Set<string>(),
     blocks: (nodes) => blocksToStorage(nodes, context),

@@ -1,5 +1,5 @@
-Texniki tapşırıq və ya müqavilə bəndidir.&#x20;
+Texniki tapşırıq və ya müqavilə bəndidir.
 
 ---
 
-`{cf:cfb-0001}`komanda tərəfindən`{cf:cfb-0002}` mövzu üçün.
+<u>komanda tərəfindən</u> mövzu üçün.

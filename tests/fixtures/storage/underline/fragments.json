@@ -1,18 +1,1 @@
-[
-  {
-    "id": "cfb-0001",
-    "kind": "inline",
-    "xhtml": "<u>",
-    "type": "wrapper",
-    "name": null,
-    "label": "u"
-  },
-  {
-    "id": "cfb-0002",
-    "kind": "inline",
-    "xhtml": "</u>",
-    "type": "wrapper",
-    "name": null,
-    "label": "end of u"
-  }
-]
+[]

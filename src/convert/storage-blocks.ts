@@ -1,7 +1,7 @@
 import type { BlockContent, Heading, List, ListItem, RootContent } from 'mdast';
 import { convertMacro } from './macro-handlers';
 import { makeBlockPlaceholder } from './placeholder-factory';
-import { childrenOf, tagOf } from './storage-parser';
+import { childrenOf, hasNamespacedMarkup, tagOf } from './storage-parser';
 import { FAITHFUL, serialiseElement } from './storage-serialiser';
 import type { ConversionContext } from './types';
 import { convertTable } from './storage-tables';
@@ -172,9 +172,31 @@ function convertParagraph(element: Element, ctx: ConversionContext): RootContent
   // has neither an empty paragraph that survives a parse nor a way to hold
   // paragraph attributes.
   if (isSpacerParagraph(element) || element.attributes.length > 0) {
-    return [{ type: 'html', value: serialiseElement(element, FAITHFUL) }];
+    return [preserveBlock(element, ctx, 'paragraph with formatting')];
   }
   return [{ type: 'paragraph', children: ctx.convertPhrasing(childrenOf(element)) }];
+}
+
+/**
+ * Writes a block out verbatim, or preserves it as a fragment when it cannot be.
+ *
+ * Verbatim is the better outcome: the markup round-trips exactly and Obsidian
+ * renders it, so an aligned heading still looks like an aligned heading. But
+ * writing the element out means writing its children out too, and a child in the
+ * `ac:` or `ri:` namespace renders as *nothing* in Obsidian (FR-4.9) — so a page
+ * whose heading wrapped an image would show an empty line where the image was.
+ * Such a block becomes an opaque placeholder instead: visibly preserved content
+ * beats invisibly lost content.
+ *
+ * In clean mode this second path is nearly unreachable, because §6.4.6 has
+ * already taken the presentation off exactly these blocks. Strict markup keeps
+ * the presentation, and pays for it here.
+ */
+function preserveBlock(element: Element, ctx: ConversionContext, label: string): RootContent {
+  if (!hasNamespacedMarkup(element)) {
+    return { type: 'html', value: serialiseElement(element, FAITHFUL) };
+  }
+  return makeBlockPlaceholder(ctx.placeholders, element, { type: tagOf(element), label });
 }
 
 /**
@@ -189,7 +211,7 @@ function convertHeading(
   ctx: ConversionContext,
 ): RootContent[] {
   if (element.attributes.length > 0) {
-    return [{ type: 'html', value: serialiseElement(element, FAITHFUL) }];
+    return [preserveBlock(element, ctx, 'heading with formatting')];
   }
   return [{ type: 'heading', depth, children: ctx.convertPhrasing(childrenOf(element)) }];
 }

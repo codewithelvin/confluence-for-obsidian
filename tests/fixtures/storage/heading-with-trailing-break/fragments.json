@@ -1,18 +1,1 @@
-[
-  {
-    "id": "cfb-0001",
-    "kind": "inline",
-    "xhtml": "<strong>",
-    "type": "strong",
-    "name": null,
-    "label": "strong with formatting"
-  },
-  {
-    "id": "cfb-0002",
-    "kind": "inline",
-    "xhtml": "</strong>",
-    "type": "strong",
-    "name": null,
-    "label": "end of strong with formatting"
-  }
-]
+[]

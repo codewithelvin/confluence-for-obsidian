@@ -13,6 +13,39 @@ export interface ConversionOptions {
   readonly baseUrl: string;
   /** Space of the page being converted, for links that omit `ri:space-key`. */
   readonly spaceKey: string;
+  /**
+   * Byte-faithful preservation instead of readability (FR-4.12, decision D14).
+   *
+   * When set, the §6.4.6 pass is skipped and `normalise()` claims no
+   * equivalences, so a push rewrites nothing — at the cost of the invisible
+   * markup that made up roughly 45 000 of space EP's 54 418 inline
+   * placeholders. Off unless the connection asks for it.
+   */
+  readonly strictMarkup?: boolean;
+  /**
+   * Vault path of a mirrored page, without the `.md`, or `null` when the page is
+   * not mirrored (FR-4.7).
+   *
+   * The converter is pure and cannot see the vault, so this is the one question
+   * it has to ask. Absent means "nothing is mirrored", which yields ordinary
+   * absolute links — correct, just not a graph.
+   */
+  readonly resolveTarget?: (target: PageTarget) => string | null;
+  /**
+   * The inverse, for the trip back: which page a mirrored note holds, or `null`
+   * when the path is not a mirrored note.
+   *
+   * Both directions or neither. A wikilink the forward pass writes and the
+   * reverse pass cannot turn back into an `ac:link` would make every page holding
+   * an internal link read-only.
+   */
+  readonly resolveVaultPath?: (path: string) => PageTarget | null;
+}
+
+/** A page as Confluence addresses it: space key plus title. */
+export interface PageTarget {
+  readonly spaceKey: string;
+  readonly title: string;
 }
 
 /** How a placeholder appears in the Markdown. */

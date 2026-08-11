@@ -2,6 +2,7 @@ import type { Link, PhrasingContent } from 'mdast';
 import { CODE_SEPARATOR, readInlinePlaceholderId } from './placeholder-registry';
 import { escapeAttribute, escapeText } from './storage-serialiser';
 import type { ReverseContext } from './types';
+import { formatWikilink, splitWikilinks, type Wikilink } from './wikilink';
 
 /**
  * Inline conversion, mdast to storage format.
@@ -73,6 +74,29 @@ function isBareUrl(node: Link, source: string): boolean {
   return first !== '[' && first !== '<';
 }
 
+/** The `ri:page` resource for a page link. */
+function pageResource(space: string, title: string): string {
+  return (
+    `<ri:page ri:content-title="${escapeAttribute(title)}"` +
+    ` ri:space-key="${escapeAttribute(space)}"/>`
+  );
+}
+
+/**
+ * A page link whose visible text is plain.
+ *
+ * Text equal to the title is how a bodyless `ac:link` renders, so it must convert
+ * back to a bodyless one. Shared by the Markdown-link and wikilink paths, which
+ * have to produce byte-identical markup for the same link.
+ */
+function plainPageLink(space: string, title: string, text: string | null): string {
+  const body =
+    text === null || text === title
+      ? ''
+      : `<ac:plain-text-link-body><![CDATA[${text}]]></ac:plain-text-link-body>`;
+  return `<ac:link>${pageResource(space, title)}${body}</ac:link>`;
+}
+
 function linkToStorage(node: Link, ctx: ReverseContext): string {
   if (isBareUrl(node, ctx.source)) return ctx.phrasing(node.children);
 
@@ -80,25 +104,55 @@ function linkToStorage(node: Link, ctx: ReverseContext): string {
   const children = node.children;
   const target = pageTarget(url, ctx);
   if (target === null) {
-    return `<a href="${escapeAttribute(url)}">${ctx.phrasing(children)}</a>`;
+    // The title is part of the anchor, and dropping it lost the tooltip *and* the
+    // page's push: `<a href="…" title="t">` reproduced as `<a href="…">`.
+    const title = node.title === null || node.title === undefined ? '' : node.title;
+    const attribute = title.length === 0 ? '' : ` title="${escapeAttribute(title)}"`;
+    return `<a href="${escapeAttribute(url)}"${attribute}>${ctx.phrasing(children)}</a>`;
   }
-
-  const resource =
-    `<ri:page ri:content-title="${escapeAttribute(target.title)}"` +
-    ` ri:space-key="${escapeAttribute(target.space)}"/>`;
 
   const onlyChild = children.length === 1 ? children[0] : undefined;
   if (onlyChild?.type === 'text') {
-    // Link text equal to the title is how a bodyless ac:link renders, so it
-    // must convert back to a bodyless ac:link.
-    const body =
-      onlyChild.value === target.title
-        ? ''
-        : `<ac:plain-text-link-body><![CDATA[${onlyChild.value}]]></ac:plain-text-link-body>`;
-    return `<ac:link>${resource}${body}</ac:link>`;
+    return plainPageLink(target.space, target.title, onlyChild.value);
   }
 
-  return `<ac:link>${resource}<ac:link-body>${ctx.phrasing(children)}</ac:link-body></ac:link>`;
+  return (
+    `<ac:link>${pageResource(target.space, target.title)}` +
+    `<ac:link-body>${ctx.phrasing(children)}</ac:link-body></ac:link>`
+  );
+}
+
+/**
+ * Turns a wikilink back into the `ac:link` it came from (FR-4.7).
+ *
+ * An unresolvable path is left as the literal text it already is: the user may
+ * simply have written `[[a note of my own]]`, and inventing a Confluence link out
+ * of it would be worse than leaving it alone.
+ */
+function wikilinkToStorage(link: Wikilink, ctx: ReverseContext): string {
+  const target = ctx.resolveVaultPath?.(link.path) ?? null;
+  if (target === null) return escapeText(formatWikilink(link.path, link.label));
+
+  return plainPageLink(target.spaceKey, target.title, link.label);
+}
+
+/**
+ * Text, with any wikilinks in it converted.
+ *
+ * Wikilinks arrive as text because Markdown has no such syntax — `[[x]]` is a
+ * link reference with no definition, which CommonMark leaves literal. Text with
+ * none in it, which is nearly all of it, takes the fast path.
+ */
+function textToStorage(value: string, ctx: ReverseContext): string {
+  const segments = splitWikilinks(value);
+  const first = segments[0];
+  if (segments.length === 1 && first?.kind === 'text') return escapeText(value);
+
+  return segments
+    .map((segment) =>
+      segment.kind === 'text' ? escapeText(segment.value) : wikilinkToStorage(segment.link, ctx),
+    )
+    .join('');
 }
 
 /**
@@ -125,7 +179,7 @@ export function phrasingToStorage(nodes: readonly PhrasingContent[], ctx: Revers
 
     switch (node.type) {
       case 'text':
-        output += escapeText(node.value);
+        output += textToStorage(node.value, ctx);
         break;
       case 'strong':
         output += wrap('strong', node.children, ctx);

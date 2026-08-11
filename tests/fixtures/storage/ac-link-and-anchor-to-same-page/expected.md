@@ -1,1 +1,1 @@
-`{cf:cfb-0001}`anchor`{cf:cfb-0002}` and [Other](https://confluence.example.com/display/ENG/Other)
+<a href="https://confluence.example.com/display/ENG/Other">anchor</a> and [Other](https://confluence.example.com/display/ENG/Other)

@@ -1,9 +1,15 @@
 import type { PhrasingContent } from 'mdast';
 import { makeInlineClose, makeInlineOpen, makeInlinePlaceholder } from './placeholder-factory';
 import { CODE_SEPARATOR, collapse, readInlinePlaceholderId } from './placeholder-registry';
-import { childrenOf, isDefaultColourSpan, riAttr, tagOf } from './storage-parser';
-import { FAITHFUL, serialiseElement } from './storage-serialiser';
-import type { ConversionContext } from './types';
+import { acAttr, childrenOf, riAttr, tagOf } from './storage-parser';
+import {
+  FAITHFUL,
+  serialiseElement,
+  serialiseEndTag,
+  serialiseStartTag,
+} from './storage-serialiser';
+import type { ConversionContext, PageTarget } from './types';
+import { formatWikilink, isLinkable } from './wikilink';
 
 /**
  * Inline (phrasing) conversion, storage format to mdast (spec §6.4.2).
@@ -13,8 +19,9 @@ import type { ConversionContext } from './types';
  */
 
 /**
- * Inline elements that wrap readable prose. These are preserved as a pair so
- * their contents stay visible and editable; everything else is preserved whole.
+ * Inline HTML elements that wrap readable prose and that Obsidian renders
+ * natively. They are written out as themselves, so `<u>`, `<sub>` and `<sup>`
+ * read as underline, subscript and superscript rather than as opaque tokens.
  */
 const WRAPPER_TAGS = new Set(['u', 'ins', 'sub', 'sup', 'font', 'small', 'mark']);
 
@@ -55,10 +62,55 @@ function linkChildren(
 }
 
 /**
- * Converts `ac:link`. A page link becomes an ordinary Markdown link to an
- * absolute URL; wikilinks require knowing whether the target is mirrored, which
- * is subscription state and therefore M3 (spec FR-4.7).
+ * The visible text of a page link, for a wikilink label.
+ *
+ * `null` means the link shows the page's own title, which is what a bodyless
+ * `ac:link` renders and therefore needs no label. `undefined` means the body
+ * carries markup a wikilink label cannot hold, so the caller must fall back to an
+ * ordinary Markdown link — where `ac:link-body` still round-trips.
  */
+function plainLabel(element: Element, title: string): string | null | undefined {
+  for (const child of childrenOf(element)) {
+    if (child.nodeType !== Node.ELEMENT_NODE) continue;
+    const tag = tagOf(child as Element);
+
+    if (tag === 'ac:plain-text-link-body') {
+      const text = textOf(child as Element);
+      // Matching the title is how a bodyless link renders, and the reverse pass
+      // writes a bodyless link for exactly that case — so the two must agree.
+      return text === title ? null : text;
+    }
+    if (tag === 'ac:link-body') return undefined;
+  }
+  return null;
+}
+
+/** A label may not contain the characters that delimit a wikilink. */
+function isLabelSafe(label: string): boolean {
+  return !/[[\]|\n]/.test(label);
+}
+
+/**
+ * A page link as an Obsidian wikilink, or `null` when it cannot be one.
+ *
+ * Emitted as an `html` node so `remark-stringify` writes the brackets literally
+ * rather than escaping them into `\[\[`.
+ */
+function wikilink(
+  element: Element,
+  target: PageTarget,
+  ctx: ConversionContext,
+): PhrasingContent | null {
+  const path = ctx.resolveTarget?.(target) ?? null;
+  if (path === null || !isLinkable(path)) return null;
+
+  const label = plainLabel(element, target.title);
+  if (label === undefined) return null;
+  if (label !== null && !isLabelSafe(label)) return null;
+
+  return { type: 'html', value: formatWikilink(path, label) };
+}
+
 function convertAcLink(element: Element, ctx: ConversionContext): PhrasingContent {
   const resource = firstElement(element);
   const resourceTag = resource === null ? '' : tagOf(resource);
@@ -66,6 +118,12 @@ function convertAcLink(element: Element, ctx: ConversionContext): PhrasingConten
   if (resource !== null && resourceTag === 'ri:page') {
     const title = riAttr(resource, 'content-title') ?? '';
     const spaceKey = riAttr(resource, 'space-key') ?? ctx.spaceKey;
+
+    // A link to a page in the vault becomes a wikilink, which is what gives the
+    // mirror a graph and backlinks (FR-4.7). Anything else stays an absolute URL.
+    const linked = wikilink(element, { spaceKey, title }, ctx);
+    if (linked !== null) return linked;
+
     return {
       type: 'link',
       url: pageUrl(ctx.baseUrl, spaceKey, title),
@@ -104,7 +162,7 @@ function wrap(
   // where they no longer pair up.
   const containsBreak = element.getElementsByTagName('br').length > 0;
   if (element.attributes.length > 0 || containsBreak) {
-    return preserveWrapper(element, ctx, { type, label: `${tagOf(element)} with formatting` });
+    return preserveAsHtml(element, ctx);
   }
 
   // Emphasis needs a word to attach to. `**` is not emphasis, `** **` is not
@@ -158,7 +216,7 @@ function convertAnchor(
     (attribute) => attribute.name !== 'href' && attribute.name !== 'title',
   );
   if (extraAttributes || href.startsWith(`${ctx.baseUrl}/display/`)) {
-    return preserveWrapper(element, ctx, { type: 'link', label: 'link' });
+    return preserveAsHtml(element, ctx);
   }
 
   return {
@@ -170,7 +228,7 @@ function convertAnchor(
 }
 
 /**
- * Preserves a wrapper element around content that stays readable.
+ * Preserves an `ac:`-namespaced wrapper around content that stays readable.
  *
  * `open` is registered before the children and `close` after, so ids follow
  * document order and repeated conversion of unchanged content is identical.
@@ -187,23 +245,56 @@ function preserveWrapper(
 }
 
 /**
- * A span that carries no formatting is unwrapped; one that does is preserved as
- * a pair, so the prose between stays readable and editable.
+ * Preserves a plain-HTML wrapper as itself: its own tags, with the content
+ * converted normally in between.
  *
- * Two spans carry nothing: one with no attributes, and one whose only style is
- * `color: rgb(0,0,0)` — black text marked black. Confluence's editor emits the
- * second constantly, and preserving it turned real pages into a wall of
- * placeholder tokens with the prose buried between them.
+ * Storage format is XHTML and Markdown allows inline HTML, so `<span
+ * style="color: rgb(255,0,0);">` can simply *be* itself — the reverse pass hands
+ * an `html` node straight back, making the round trip exact, and Obsidian
+ * renders the span in reading view and Live Preview alike. It reads as red text,
+ * not as two opaque tokens with prose trapped between them.
+ *
+ * Only for elements with no namespaced markup of their own; `ac:` and `ri:` tags
+ * would render as nothing at all (FR-4.9) and must stay in fragments.
  */
-function convertSpan(
-  element: Element,
-  ctx: ConversionContext,
-): PhrasingContent | PhrasingContent[] {
-  if (element.attributes.length === 0 || isDefaultColourSpan(element)) {
-    return ctx.convertPhrasing(childrenOf(element));
-  }
+function preserveAsHtml(element: Element, ctx: ConversionContext): PhrasingContent[] {
+  return [
+    { type: 'html', value: serialiseStartTag(element, FAITHFUL) },
+    ...ctx.convertPhrasing(childrenOf(element)),
+    { type: 'html', value: serialiseEndTag(element) },
+  ];
+}
 
-  return preserveWrapper(element, ctx, { type: 'span', label: 'styled text' });
+/**
+ * A span is written out as itself.
+ *
+ * Whether it carries anything is settled before conversion: the §6.4.6 pass
+ * unwraps every span whose style only restated a default, which on space EP was
+ * 23 303 of 42 101 of them. Whatever survives is real formatting, and it renders
+ * as that formatting rather than as a pair of tokens.
+ */
+function convertSpan(element: Element, ctx: ConversionContext): PhrasingContent[] {
+  return preserveAsHtml(element, ctx);
+}
+
+/**
+ * Preserves a construct with no Markdown equivalent, named as usefully as it can
+ * be.
+ *
+ * A macro's `ac:name` is the informative part — `viewdoc`, `jira`, `toc` — and the
+ * tag is the same string for all of them. Naming the tag instead put
+ * `ac:structured-macro: 250` in front of the reader, which says nothing about what
+ * is missing (FR-4.5).
+ */
+function preserveUnknown(element: Element, ctx: ConversionContext): PhrasingContent {
+  const tag = tagOf(element);
+  const macro = tag === 'ac:structured-macro' ? acAttr(element, 'name') : null;
+
+  return makeInlinePlaceholder(ctx.placeholders, element, {
+    type: 'unsupported',
+    name: macro ?? tag,
+    label: macro === null ? `${tag}: ${collapse(textOf(element), 40)}` : `${macro} macro`,
+  });
 }
 
 export function convertPhrasingElement(
@@ -254,13 +345,7 @@ export function convertPhrasingElement(
       // A wrapper preserved whole would hide the prose inside it, so wrappers
       // are preserved as a pair instead. Everything else — self-contained
       // constructs whose inner markup is not readable text — is preserved whole.
-      return WRAPPER_TAGS.has(tag)
-        ? preserveWrapper(element, ctx, { type: 'wrapper', label: tag })
-        : makeInlinePlaceholder(ctx.placeholders, element, {
-            type: 'unsupported',
-            name: tag,
-            label: `${tag}: ${collapse(textOf(element), 40)}`,
-          });
+      return WRAPPER_TAGS.has(tag) ? preserveAsHtml(element, ctx) : preserveUnknown(element, ctx);
   }
 }
 
@@ -318,6 +403,30 @@ function htmlTrailingBreak(nodes: readonly PhrasingContent[]): PhrasingContent[]
   return output;
 }
 
+/**
+ * Writes hard breaks as `<br/>` when the run also contains inline HTML.
+ *
+ * `remark-stringify` renders a hard break as `\` followed by a newline — except
+ * next to inline HTML, where it emits `\` followed by a *space*. A backslash
+ * before a space is not an escape in Markdown, so it re-parses as a literal
+ * backslash and the line break is **gone**: `<span>a</span><br/><span>b</span>`
+ * came back as `<span>a</span>\ <span>b</span>`.
+ *
+ * Only when HTML is present, so ordinary prose keeps the tidier `\` form.
+ */
+function htmlBreaksBesideHtml(nodes: readonly PhrasingContent[]): PhrasingContent[] {
+  return nodes.map((node, index) => {
+    if (node.type !== 'break') return node;
+
+    // Adjacency, not presence. Converting every break in any run that held HTML
+    // *anywhere* turned a whole paragraph of line breaks into one line of raw
+    // `<br/>` tags the moment it contained a single coloured word — 6 787 of them
+    // across space EP, where 462 had been enough.
+    const beside = nodes[index - 1]?.type === 'html' || nodes[index + 1]?.type === 'html';
+    return beside ? { type: 'html' as const, value: '<br/>' } : node;
+  });
+}
+
 export function convertPhrasingNodes(
   nodes: readonly Node[],
   ctx: ConversionContext,
@@ -337,5 +446,5 @@ export function convertPhrasingNodes(
     else output.push(converted);
   }
 
-  return separateAdjacentCode(htmlTrailingBreak(output));
+  return separateAdjacentCode(htmlBreaksBesideHtml(htmlTrailingBreak(output)));
 }

@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "id": "cfb-0001",
+    "kind": "inline",
+    "xhtml": "<ac:image ac:thumbnail=\"true\" ac:width=\"50\"><ri:attachment ri:filename=\"Homepage.jpg\"/></ac:image>",
+    "type": "image",
+    "name": null,
+    "label": "image: Homepage.jpg"
+  }
+]

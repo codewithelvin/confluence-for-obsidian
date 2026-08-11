@@ -1,1 +1,1 @@
-A `{cf:cfb-0001}`red`{cf:cfb-0002}` word.
+A <span style="color: rgb(255,0,0)">red</span> word.

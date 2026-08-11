@@ -1,1 +1,1 @@
-Text before<br/>
+Text before

@@ -1,4 +1,4 @@
-import type { RootContent, Table, TableCell, TableRow } from 'mdast';
+import type { PhrasingContent, RootContent, Table, TableCell, TableRow } from 'mdast';
 import { makeBlockPlaceholder } from './placeholder-factory';
 import { childrenOf, tagOf } from './storage-parser';
 import type { ConversionContext } from './types';
@@ -15,6 +15,15 @@ import type { ConversionContext } from './types';
  * whole page read-only. A single opaque table costs less than losing the ability
  * to edit the page around it.
  */
+
+/**
+ * Marks a cell that was a `<th>` outside the header row.
+ *
+ * An HTML comment, so it is invisible in Reading View and Live Preview, and the
+ * same device the task-list converter already uses to carry a Confluence task id
+ * through a GFM checkbox. It is removed again on the way back to storage format.
+ */
+export const ROW_HEADER_MARKER = '<!--cf-th-->';
 
 /** Content that cannot appear inside a GFM table cell. */
 const BLOCK_TAGS = new Set([
@@ -93,8 +102,23 @@ function hasSpan(cell: Element): boolean {
   return (colspan !== null && colspan !== '1') || (rowspan !== null && rowspan !== '1');
 }
 
+/** One cell of a table that can be written as GFM. */
+interface SimpleCell {
+  readonly nodes: readonly Node[];
+  /**
+   * A `<th>` outside the header row — Confluence's row headers, which these
+   * specification pages use constantly for a leading label column.
+   *
+   * GFM has no way to mark one, so it is carried in the cell as an HTML comment
+   * and restored on the way back (§6.4.2, ROW_HEADER_MARKER). Without it the
+   * reverse pass wrote `<td>`, the reproduced table no longer matched the
+   * original, and every page holding such a table became read-only.
+   */
+  readonly isRowHeader: boolean;
+}
+
 interface SimpleTable {
-  readonly rows: readonly (readonly (readonly Node[])[])[];
+  readonly rows: readonly (readonly SimpleCell[])[];
 }
 
 /**
@@ -120,13 +144,13 @@ export function analyseTable(table: Element): SimpleTable | null {
   if (!headerCells.every((cell) => tagOf(cell) === 'th')) return null;
 
   const width = headerCells.length;
-  const grid: (readonly Node[])[][] = [];
+  const grid: SimpleCell[][] = [];
 
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const cells = elementsOf(row).filter((cell) => tagOf(cell) === 'td' || tagOf(cell) === 'th');
     if (cells.length !== width) return null;
 
-    const converted: (readonly Node[])[] = [];
+    const converted: SimpleCell[] = [];
     for (const cell of cells) {
       if (hasSpan(cell)) return null;
       // Cell attributes carry highlight colours and titles a Markdown table
@@ -134,12 +158,27 @@ export function analyseTable(table: Element): SimpleTable | null {
       if (cell.attributes.length > 0) return null;
       const inline = cellInlineNodes(cell);
       if (inline === null) return null;
-      converted.push(inline);
+      converted.push({ nodes: inline, isRowHeader: index > 0 && tagOf(cell) === 'th' });
     }
     grid.push(converted);
   }
 
   return { rows: grid };
+}
+
+/**
+ * Makes converted content safe to put in a GFM cell.
+ *
+ * A Markdown hard break cannot exist inside a table row — there is nowhere for
+ * the newline to go — so `remark-stringify` writes it as a plain space and the
+ * line break is **gone**, silently, from a cell that had one. Written as `<br/>`
+ * instead it survives, renders in Obsidian, and reproduces exactly.
+ *
+ * Only reachable since §6.4.6 started freeing real tables; before that a cell
+ * like this lived inside an opaque placeholder where nothing touched it.
+ */
+function asCellContent(nodes: readonly PhrasingContent[]): PhrasingContent[] {
+  return nodes.map((node) => (node.type === 'break' ? { type: 'html', value: '<br/>' } : node));
 }
 
 export function convertTable(table: Element, ctx: ConversionContext): RootContent {
@@ -153,10 +192,15 @@ export function convertTable(table: Element, ctx: ConversionContext): RootConten
 
   const rows: TableRow[] = analysed.rows.map((cells) => ({
     type: 'tableRow',
-    children: cells.map((nodes): TableCell => ({
-      type: 'tableCell',
-      children: ctx.convertPhrasing(nodes),
-    })),
+    children: cells.map((cell): TableCell => {
+      const children = asCellContent(ctx.convertPhrasing(cell.nodes));
+      return {
+        type: 'tableCell',
+        children: cell.isRowHeader
+          ? [...children, { type: 'html', value: ROW_HEADER_MARKER }]
+          : children,
+      };
+    }),
   }));
 
   const result: Table = { type: 'table', align: null, children: rows };

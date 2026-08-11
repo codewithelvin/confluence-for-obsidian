@@ -4,6 +4,7 @@ import remarkStringify from 'remark-stringify';
 import { unified } from 'unified';
 import type { AppError } from '../util/errors';
 import { ok, type Result } from '../util/result';
+import { discardInvisibleMarkup } from './discard';
 import { PlaceholderRegistry } from './placeholder-registry';
 import { convertMixedContent } from './storage-blocks';
 import { childrenOf, parseStorage } from './storage-parser';
@@ -41,11 +42,18 @@ export function storageToMarkdown(
   const parsed = parseStorage(xhtml);
   if (!parsed.ok) return parsed;
 
+  // Before anything is converted, so the whitelist below never has to reason
+  // about markup that renders as nothing. `normaliseStorage` applies the very
+  // same pass, which is what keeps certification honest (§6.4.5).
+  if (options.strictMarkup !== true) discardInvisibleMarkup(parsed.value);
+
   const placeholders = new PlaceholderRegistry();
+  // Spread rather than copied field by field: hand-copying silently dropped the
+  // link resolvers when FR-4.7 added them, and the conversion carried on producing
+  // absolute URLs with no error anywhere to say why.
   const context: ConversionContext = {
+    ...options,
     placeholders,
-    baseUrl: options.baseUrl,
-    spaceKey: options.spaceKey,
     convertBlocks: (nodes) => convertMixedContent(nodes, context),
     convertPhrasing: (nodes) => convertPhrasingNodes(nodes, context),
   };

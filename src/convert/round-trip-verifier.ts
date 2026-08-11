@@ -63,7 +63,13 @@ export function certify(
     });
   }
 
-  const canonical = { defaultSpaceKey: options.spaceKey };
+  // The same flag the conversion ran under: a comparison that claimed
+  // equivalences the converter did not make — or refused ones it did — would
+  // certify the wrong pages in both directions (§6.4.5).
+  const canonical = {
+    defaultSpaceKey: options.spaceKey,
+    ...(options.strictMarkup === undefined ? {} : { strictMarkup: options.strictMarkup }),
+  };
   const expected = normaliseStorage(storage, canonical);
   const actual = normaliseStorage(back.value, canonical);
 

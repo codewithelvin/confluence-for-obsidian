@@ -1,1 +1,1 @@
-See `{cf:cfb-0001}`Other`{cf:cfb-0002}` for detail.
+See <a href="https://confluence.example.com/display/ENG/Other">Other</a> for detail.

@@ -1,18 +1,1 @@
-[
-  {
-    "id": "cfb-0001",
-    "kind": "inline",
-    "xhtml": "<a href=\"https://confluence.example.com/display/ENG/Other\">",
-    "type": "link",
-    "name": null,
-    "label": "link"
-  },
-  {
-    "id": "cfb-0002",
-    "kind": "inline",
-    "xhtml": "</a>",
-    "type": "link",
-    "name": null,
-    "label": "end of link"
-  }
-]
+[]
