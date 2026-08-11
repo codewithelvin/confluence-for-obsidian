@@ -1,5 +1,6 @@
 import type { Subscription } from '../settings/settings-types';
 import { AppError } from '../util/errors';
+import { sanitiseSegment } from '../vault/filename-sanitiser';
 import { mountsOverlap } from '../vault/path-mapper';
 
 /**
@@ -27,12 +28,18 @@ export interface SubscriptionDraft {
  * the whole gateway rests on.
  */
 export function normaliseMountPath(raw: string): string {
-  return raw
-    .replace(/\\/g, '/')
-    .split('/')
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
-    .join('/');
+  return (
+    raw
+      .replace(/\\/g, '/')
+      .split('/')
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+      // Sanitised per segment for the same reason page titles are: the mount is
+      // typed by hand, and a space key pasted as `EP: Portal` would otherwise be
+      // rejected by Windows at write time rather than here, at save time.
+      .map((segment) => sanitiseSegment(segment))
+      .join('/')
+  );
 }
 
 /** `null` when the draft may be saved, otherwise the reason it may not. */

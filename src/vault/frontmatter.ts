@@ -15,6 +15,13 @@ import { asFiniteNumber, asNonEmptyString, isRecord } from '../util/guards';
 /** The reserved frontmatter key. Everything under it is plugin-owned. */
 export const CONFLUENCE_KEY = 'confluence';
 
+/**
+ * Obsidian's own alias key, which the plugin *shares* rather than owns: it
+ * maintains the single entry holding the page's true title (FR-4.11) and leaves
+ * every other entry alone.
+ */
+export const ALIASES_KEY = 'aliases';
+
 export type Fidelity = 'certified' | 'degraded';
 
 /** Portable page identity, per spec §6.5.1. */
@@ -93,6 +100,45 @@ export function readIdentity(frontmatter: unknown): ConfluenceIdentity | null {
     updatedBy: asNonEmptyString(raw['updatedBy']) ?? '',
     fidelity: raw['fidelity'] === 'degraded' ? 'degraded' : 'certified',
   };
+}
+
+/**
+ * Reads `aliases`, which Obsidian accepts as either a list or a bare string.
+ *
+ * Anything that is neither is treated as no aliases at all rather than being
+ * coerced: a malformed value is the user's, and overwriting it would lose it.
+ */
+function readAliases(value: unknown): readonly string[] {
+  if (typeof value === 'string') return value.length === 0 ? [] : [value];
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+/**
+ * Maintains the plugin's title alias (FR-4.11).
+ *
+ * `next` is the title to hold, or `null` when the file name is already the title
+ * and no alias is needed. `previous` is the alias written last time, the only
+ * entry this function may remove — every other entry belongs to the user
+ * (§6.5.1).
+ *
+ * Mutates the record because that is the contract of Obsidian's
+ * `processFrontMatter` callback, which is the only sanctioned way to touch
+ * frontmatter (§7.4).
+ */
+export function applyAlias(
+  frontmatter: Record<string, unknown>,
+  next: string | null,
+  previous: string | null,
+): void {
+  const existing = readAliases(frontmatter[ALIASES_KEY]);
+  const kept = existing.filter((alias) => alias !== previous && alias !== next);
+  const aliases = next === null ? kept : [...kept, next];
+
+  // An empty list is deleted rather than written: `aliases: []` in every note of
+  // a mirror is noise the user did not ask for.
+  if (aliases.length === 0) delete frontmatter[ALIASES_KEY];
+  else frontmatter[ALIASES_KEY] = aliases;
 }
 
 /** Frontmatter block plus body, as split by `splitFrontmatter`. */

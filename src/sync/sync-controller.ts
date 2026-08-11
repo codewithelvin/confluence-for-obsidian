@@ -1,12 +1,13 @@
 import type { ConfluenceGateway } from '../api/confluence-client';
+import type { FragmentMap } from '../convert/types';
 import type { SettingsStore } from '../settings/settings-store';
 import type { ConnectionProfile, Subscription } from '../settings/settings-types';
 import { AppError } from '../util/errors';
 import type { Logger } from '../util/logger';
 import { err, ok, type Result } from '../util/result';
-import { spaceFolderPath } from '../vault/path-mapper';
 import { parentPath, type VaultGateway } from '../vault/vault-gateway';
 import type { FragmentStore } from './fragment-store';
+import { LinkIndex, linkPath, type MirroredPage } from './link-index';
 import { pullSinglePage } from './pull-executor';
 import { SyncEngine, type SyncEngineDeps } from './sync-engine';
 import type { PageState, SyncStateStore } from './sync-state';
@@ -144,8 +145,7 @@ export class SyncController {
    */
   async remove(subscription: Subscription, deleteFiles: boolean): Promise<Result<void, AppError>> {
     if (deleteFiles) {
-      const folder = spaceFolderPath(subscription.mountPath, subscription.spaceKey);
-      const trashed = await this.deps.vault.trash(folder);
+      const trashed = await this.deps.vault.trash(subscription.mountPath);
       if (!trashed.ok) return trashed;
     }
 
@@ -210,7 +210,13 @@ export class SyncController {
     callbacks: SyncCallbacks,
   ): Promise<Result<SyncReport, AppError>> {
     const result = await this.engine.sync(
-      { subscription, client: this.deps.createClient(connection), baseUrl: connection.baseUrl },
+      {
+        subscription,
+        client: this.deps.createClient(connection),
+        baseUrl: connection.baseUrl,
+        strictMarkup: connection.strictMarkup,
+        mirrored: this.mirroredElsewhere(subscription.id),
+      },
       {
         ...callbacks,
         onProgress: (progress) => {
@@ -230,6 +236,49 @@ export class SyncController {
       );
     }
     return result;
+  }
+
+  /**
+   * Pages the *other* subscriptions mirror, so a link that crosses spaces can
+   * still become a wikilink (FR-4.7).
+   *
+   * The controller is the only layer that knows every subscription; the engine is
+   * handed one at a time. Excludes the subscription being synced, whose own pages
+   * the engine derives from the placement it is about to make rather than from the
+   * index it is about to replace.
+   */
+  private mirroredElsewhere(subscriptionId: string | null): readonly MirroredPage[] {
+    const pages: MirroredPage[] = [];
+
+    for (const subscription of this.deps.settings.get().subscriptions) {
+      if (subscription.id === subscriptionId) continue;
+
+      for (const page of Object.values(this.deps.state.forSubscription(subscription.id).pages)) {
+        pages.push({
+          spaceKey: subscription.spaceKey,
+          title: page.title,
+          path: linkPath(page.localPath),
+        });
+      }
+    }
+    return pages;
+  }
+
+  /**
+   * The preserved fragments behind a note's placeholders, for the renderer
+   * (spec FR-4.5).
+   *
+   * Empty for a note with no Confluence identity or no cached fragments — a
+   * placeholder with nothing behind it still renders, it just cannot say what it
+   * stands for.
+   */
+  async fragmentsFor(notePath: string): Promise<FragmentMap> {
+    const identity = this.deps.vault.readIdentity(notePath);
+    if (identity === null) return new Map();
+
+    const loaded = await this.deps.fragments.load(identity.id);
+    if (!loaded.ok || loaded.value === null) return new Map();
+    return loaded.value.fragments;
   }
 
   /** The Confluence URL recorded in a note's frontmatter (spec FR-10.5). */
@@ -283,6 +332,10 @@ export class SyncController {
     }
 
     const previous = this.deps.state.forSubscription(subscription.id).pages[identity.id];
+    // Every subscription this time, its own included: a single-page pull does not
+    // recompute any paths, so the index is exactly right about all of them.
+    const linkIndex = new LinkIndex(this.mirroredElsewhere(null));
+
     const pulled = await pullSinglePage(
       {
         client: this.deps.createClient(connection),
@@ -290,11 +343,17 @@ export class SyncController {
         fragments: this.deps.fragments,
         logger: this.deps.logger,
         baseUrl: connection.baseUrl,
+        strictMarkup: connection.strictMarkup,
+        resolveTarget: linkIndex.resolveTarget,
+        resolveVaultPath: linkIndex.resolveVaultPath,
         now: this.deps.now,
       },
       identity.id,
-      notePath,
-      previous?.isFolderNote ?? isFolderNotePath(notePath),
+      {
+        path: notePath,
+        isFolderNote: previous?.isFolderNote ?? isFolderNotePath(notePath),
+        alias: previous?.alias ?? null,
+      },
     );
     if (!pulled.ok) return pulled;
 

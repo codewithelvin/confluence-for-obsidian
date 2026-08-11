@@ -45,9 +45,9 @@ describe('ConnectionModal', () => {
     return { modal, onSubmit, fields: inputsOf(modal.contentEl) };
   }
 
-  it('renders name, base URL and token fields', () => {
+  it('renders name, base URL, token and strict-markup fields', () => {
     const { fields } = open();
-    expect(fields).toHaveLength(3);
+    expect(fields).toHaveLength(4);
   });
 
   it('masks the token field', () => {
@@ -175,9 +175,9 @@ describe('ConfirmModal', () => {
 
 describe('filterSpaces', () => {
   const spaces: ConfluenceSpace[] = [
-    { key: 'ENG', name: 'Engineering', type: 'global' },
-    { key: 'OPS', name: 'Operations', type: 'global' },
-    { key: 'HR', name: 'People and Culture', type: 'global' },
+    { key: 'ENG', name: 'Engineering', type: 'global', homepageId: null },
+    { key: 'OPS', name: 'Operations', type: 'global', homepageId: null },
+    { key: 'HR', name: 'People and Culture', type: 'global', homepageId: null },
   ];
 
   it('returns everything for an empty query', () => {
@@ -204,8 +204,8 @@ describe('filterSpaces', () => {
 
 describe('SpaceBrowserModal', () => {
   const spaces: ConfluenceSpace[] = [
-    { key: 'ENG', name: 'Engineering', type: 'global' },
-    { key: 'OPS', name: 'Operations', type: 'global' },
+    { key: 'ENG', name: 'Engineering', type: 'global', homepageId: null },
+    { key: 'OPS', name: 'Operations', type: 'global', homepageId: null },
   ];
 
   it('lists every space with a select button', () => {
@@ -281,7 +281,14 @@ describe('ConnectionsSection', () => {
   it('lists a configured connection with its base URL', async () => {
     const { section, store, containerEl } = setup();
     await store.update({
-      connections: [{ id: 'c1', displayName: 'Corporate wiki', baseUrl: 'https://wiki.corp' }],
+      connections: [
+        {
+          id: 'c1',
+          displayName: 'Corporate wiki',
+          baseUrl: 'https://wiki.corp',
+          strictMarkup: false,
+        },
+      ],
     });
     section.render(containerEl);
 
@@ -292,7 +299,14 @@ describe('ConnectionsSection', () => {
   it('flags a connection with no stored token', async () => {
     const { section, store, containerEl } = setup();
     await store.update({
-      connections: [{ id: 'c1', displayName: 'Corporate wiki', baseUrl: 'https://wiki.corp' }],
+      connections: [
+        {
+          id: 'c1',
+          displayName: 'Corporate wiki',
+          baseUrl: 'https://wiki.corp',
+          strictMarkup: false,
+        },
+      ],
     });
     section.render(containerEl);
 
@@ -303,7 +317,14 @@ describe('ConnectionsSection', () => {
     // Removing it would orphan the subscriptions and their mirrored files.
     const { section, store, containerEl } = setup();
     await store.update({
-      connections: [{ id: 'c1', displayName: 'Corporate wiki', baseUrl: 'https://wiki.corp' }],
+      connections: [
+        {
+          id: 'c1',
+          displayName: 'Corporate wiki',
+          baseUrl: 'https://wiki.corp',
+          strictMarkup: false,
+        },
+      ],
       subscriptions: [
         {
           id: 's1',

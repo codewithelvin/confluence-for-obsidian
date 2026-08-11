@@ -33,7 +33,7 @@ const SUBSCRIPTION: Subscription = {
   connectionId: 'conn',
   spaceKey: 'ENG',
   rootPageId: null,
-  mountPath: 'Confluence',
+  mountPath: 'ENG',
   syncComments: true,
 };
 
@@ -60,7 +60,9 @@ async function setup(): Promise<void> {
   settings = new SettingsStore(plugin, logger);
   await settings.load();
   await settings.update({
-    connections: [{ id: 'conn', displayName: 'Corp wiki', baseUrl: 'https://wiki.corp' }],
+    connections: [
+      { id: 'conn', displayName: 'Corp wiki', baseUrl: 'https://wiki.corp', strictMarkup: false },
+    ],
   });
 
   controller = new SyncController({
@@ -170,7 +172,7 @@ describe('pull this page (FR-3.8)', () => {
   });
 
   it('ignores a file that is not Markdown', async () => {
-    openNote('Confluence/ENG/diagram.png');
+    openNote('ENG/diagram.png');
 
     run('pull-current-page');
     await settle();
@@ -192,7 +194,7 @@ describe('pull this page (FR-3.8)', () => {
     client.pages = [{ id: '1', title: 'Architecture' }];
     await controller.sync(SUBSCRIPTION);
     Notice.reset();
-    openNote('Confluence/ENG/Architecture.md');
+    openNote('ENG/Architecture.md');
 
     run('pull-current-page');
     await settle();
@@ -208,7 +210,7 @@ describe('open in Confluence (FR-10.5)', () => {
     await settings.update({ subscriptions: [SUBSCRIPTION] });
     client.pages = [{ id: '1', title: 'A' }];
     await controller.sync(SUBSCRIPTION);
-    openNote('Confluence/ENG/A.md');
+    openNote('ENG/A.md');
 
     run('open-in-confluence');
 

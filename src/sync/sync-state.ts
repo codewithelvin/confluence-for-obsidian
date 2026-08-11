@@ -35,6 +35,15 @@ export interface PageState {
    * not move a whole subtree twice.
    */
   readonly isFolderNote: boolean;
+  /**
+   * Title alias last written to this note's frontmatter (FR-4.11), or `null` if
+   * none was.
+   *
+   * Recorded so a page whose title changed does not leave its old alias behind.
+   * Without it there is no way to tell the plugin's alias from one the user
+   * added, and removing the wrong one deletes the user's work.
+   */
+  readonly alias: string | null;
   /** sha256 of the local file as last written or last seen unchanged. */
   readonly localHash: string;
   /** sha256 of the last-synced remote storage body. */
@@ -71,6 +80,7 @@ function parsePageState(raw: unknown): PageState | null {
     pageId,
     localPath,
     isFolderNote: raw['isFolderNote'] === true,
+    alias: asNonEmptyString(raw['alias']),
     title: asString(raw['title']) ?? '',
     parentId: asNonEmptyString(raw['parentId']),
     remoteVersion: asFiniteNumber(raw['remoteVersion']) ?? 0,

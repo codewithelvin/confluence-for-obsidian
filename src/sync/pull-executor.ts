@@ -1,5 +1,6 @@
 import type { ConfluenceGateway } from '../api/confluence-client';
 import { certify } from '../convert/round-trip-verifier';
+import type { PageTarget } from '../convert/types';
 import { AppError } from '../util/errors';
 import { sha256 } from '../util/hash';
 import { err, ok, type Result } from '../util/result';
@@ -28,6 +29,11 @@ export interface ExecutorDeps {
   readonly fragments: FragmentStore;
   readonly logger: Logger;
   readonly baseUrl: string;
+  /** Byte-faithful conversion for this connection (spec FR-4.12). */
+  readonly strictMarkup: boolean;
+  /** Wikilink resolution, in both directions (spec FR-4.7). */
+  readonly resolveTarget: (target: PageTarget) => string | null;
+  readonly resolveVaultPath: (path: string) => PageTarget | null;
   readonly now: () => string;
 }
 
@@ -91,7 +97,13 @@ async function writePage(
   storage: string,
   outcome: { states: PageState[]; degraded: LocalPage[] },
 ): Promise<AppError | null> {
-  const converted = certify(storage, { baseUrl: deps.baseUrl, spaceKey: item.page.spaceKey });
+  const converted = certify(storage, {
+    baseUrl: deps.baseUrl,
+    spaceKey: item.page.spaceKey,
+    strictMarkup: deps.strictMarkup,
+    resolveTarget: deps.resolveTarget,
+    resolveVaultPath: deps.resolveVaultPath,
+  });
   if (!converted.ok) return converted.error;
 
   const fidelity = converted.value.certified ? 'certified' : 'degraded';
@@ -99,6 +111,8 @@ async function writePage(
     path: item.path,
     body: converted.value.markdown,
     identity: identityFor(deps, item, fidelity),
+    alias: item.alias,
+    previousAlias: item.previousAlias,
   });
   if (!written.ok) return written.error;
 
@@ -118,6 +132,7 @@ async function writePage(
     remoteVersion: item.page.version,
     localPath: item.path,
     isFolderNote: item.isFolderNote,
+    alias: item.alias,
     localHash: await sha256(written.value),
     storageHash,
     fidelity,
@@ -170,6 +185,13 @@ export async function pullPages(
   return { states: outcome.states, degraded: outcome.degraded, failures };
 }
 
+/** Where a single-page pull writes, as the index already records it. */
+export interface SinglePageTarget {
+  readonly path: string;
+  readonly isFolderNote: boolean;
+  readonly alias: string | null;
+}
+
 /**
  * Re-pulls one page on demand (spec FR-3.8).
  *
@@ -180,8 +202,7 @@ export async function pullPages(
 export async function pullSinglePage(
   deps: ExecutorDeps,
   pageId: string,
-  path: string,
-  isFolderNote: boolean,
+  target: SinglePageTarget,
 ): Promise<Result<PageState, AppError>> {
   const fetched = await deps.client.getPage(pageId);
   if (!fetched.ok) return fetched;
@@ -189,7 +210,17 @@ export async function pullSinglePage(
   const outcome = { states: [] as PageState[], degraded: [] as LocalPage[] };
   const error = await writePage(
     deps,
-    { page: fetched.value, path, isFolderNote, isNew: false },
+    {
+      page: fetched.value,
+      path: target.path,
+      isFolderNote: target.isFolderNote,
+      isNew: false,
+      // Unchanged on purpose: a single-page pull refreshes a body in place and
+      // never recomputes the path, so the name — and therefore the alias that
+      // stands in for the title — is not its business either.
+      alias: target.alias,
+      previousAlias: target.alias,
+    },
     fetched.value.storage,
     outcome,
   );

@@ -80,6 +80,9 @@ function parseConnection(raw: unknown): ConnectionProfile | null {
     id,
     baseUrl,
     displayName: readNonEmptyString(raw['displayName']) ?? baseUrl,
+    // Absent on a connection saved before FR-4.12 existed, and absent means the
+    // default: readable notes rather than byte-faithful markup (D14).
+    strictMarkup: raw['strictMarkup'] === true,
   };
 }
 

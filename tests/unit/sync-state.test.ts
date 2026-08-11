@@ -13,6 +13,7 @@ const PAGE: PageState = {
   remoteVersion: 3,
   localPath: 'Confluence/ENG/A.md',
   isFolderNote: false,
+  alias: null,
   localHash: 'local',
   storageHash: 'storage',
   fidelity: 'certified',

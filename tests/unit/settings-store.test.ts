@@ -27,6 +27,7 @@ const validConnection = {
   id: 'c1',
   displayName: 'Corp Wiki',
   baseUrl: 'https://wiki.corp/confluence',
+  strictMarkup: false,
 };
 const validSubscription = {
   id: 's1',

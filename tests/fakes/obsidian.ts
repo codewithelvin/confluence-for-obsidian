@@ -160,6 +160,7 @@ export class Plugin {
 
   readonly views = new Map<string, unknown>();
   readonly codeBlockProcessors = new Map<string, unknown>();
+  readonly postProcessors: unknown[] = [];
   readonly statusBarItems: HTMLElement[] = [];
 
   registerEvent(): void {}
@@ -172,6 +173,10 @@ export class Plugin {
 
   registerMarkdownCodeBlockProcessor(language: string, handler: unknown): void {
     this.codeBlockProcessors.set(language, handler);
+  }
+
+  registerMarkdownPostProcessor(handler: unknown): void {
+    this.postProcessors.push(handler);
   }
 
   addStatusBarItem(): HTMLElement {

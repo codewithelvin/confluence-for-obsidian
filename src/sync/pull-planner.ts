@@ -25,6 +25,10 @@ export interface PullItem {
   readonly path: string;
   readonly isFolderNote: boolean;
   readonly isNew: boolean;
+  /** Title to hold in `aliases` because the file name is not it (FR-4.11). */
+  readonly alias: string | null;
+  /** Alias written last time, so a retitled page does not leave a stale one behind. */
+  readonly previousAlias: string | null;
 }
 
 export interface MoveOp {
@@ -170,6 +174,8 @@ function classifyTracked(
       path: mapped.notePath,
       isFolderNote: mapped.folderPath !== null,
       isNew: false,
+      alias: mapped.aliasTitle,
+      previousAlias: previous.alias,
     });
     return false;
   }
@@ -218,6 +224,8 @@ export function buildPullPlan(input: PlanInput): PullPlan {
         path: mapped.notePath,
         isFolderNote: mapped.folderPath !== null,
         isNew: true,
+        alias: mapped.aliasTitle,
+        previousAlias: null,
       });
       continue;
     }

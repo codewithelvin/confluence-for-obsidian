@@ -9,6 +9,15 @@ export interface ConnectionProfile {
   readonly displayName: string;
   /** Base URL including any reverse-proxy context path (spec FR-1.2). */
   readonly baseUrl: string;
+  /**
+   * Keep byte-faithful markup instead of a readable note (spec FR-4.12, D14).
+   *
+   * Off by default: markup Confluence renders as nothing is dropped (§6.4.6), at
+   * the price of a push rewriting it out of the stored body and showing a diff in
+   * the page's history. On, nothing is dropped and the note carries a preserved
+   * token for every one of them.
+   */
+  readonly strictMarkup: boolean;
 }
 
 /** A tracked {connection, space, optional root page} -> mount path mapping (spec FR-2.2). */

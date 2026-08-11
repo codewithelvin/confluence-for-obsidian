@@ -72,6 +72,7 @@ export function buildUrl(baseUrl: string, path: string, query: QueryParams = {})
 export const ENDPOINTS = {
   currentUser: '/rest/api/user/current',
   spaces: '/rest/api/space',
+  spaceByKey: (key: string): string => `/rest/api/space/${encodeURIComponent(key)}`,
   content: '/rest/api/content',
   contentSearch: '/rest/api/content/search',
   contentById: (id: string): string => `/rest/api/content/${encodeURIComponent(id)}`,

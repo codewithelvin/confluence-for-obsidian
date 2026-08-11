@@ -101,6 +101,7 @@ export class ConnectionsSection {
             displayName: existing.displayName,
             baseUrl: existing.baseUrl,
             hasStoredToken: this.deps.credentials.has(existing.id),
+            strictMarkup: existing.strictMarkup,
           };
 
     new ConnectionModal(this.deps.app, initial, (draft) => {
@@ -117,6 +118,7 @@ export class ConnectionsSection {
       id,
       displayName: draft.displayName,
       baseUrl: draft.baseUrl,
+      strictMarkup: draft.strictMarkup,
     };
 
     const current = this.deps.store.get().connections;

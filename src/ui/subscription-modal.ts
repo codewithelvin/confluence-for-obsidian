@@ -1,5 +1,5 @@
 import { Modal, Notice, Setting } from 'obsidian';
-import type { App } from 'obsidian';
+import type { App, TextComponent } from 'obsidian';
 import type { ConfluenceSpace } from '../api/api-types';
 import type { ConnectionProfile, Subscription } from '../settings/settings-types';
 import type { SubscriptionCheck } from '../sync/subscription-service';
@@ -28,14 +28,19 @@ export interface SubscriptionModalDeps {
   readonly onSave: (draft: SubscriptionDraft) => void;
 }
 
-const DEFAULT_MOUNT = 'Confluence';
-
 export class SubscriptionModal extends Modal {
   private connectionId: string;
   private spaceKey = '';
   private spaceName = '';
   private rootPageId = '';
-  private mountPath = DEFAULT_MOUNT;
+  /**
+   * The mount folder *is* the space folder (D13), so it defaults to the space
+   * key and follows the chosen space until the user types a folder of their own.
+   * Defaulting to a `Confluence/` parent is what produced `EP/EP/…`.
+   */
+  private mountPath = '';
+  private mountEdited = false;
+  private mountInput: TextComponent | null = null;
   private spaceEl: HTMLElement | null = null;
 
   constructor(
@@ -120,12 +125,18 @@ export class SubscriptionModal extends Modal {
 
     new Setting(contentEl)
       .setName('Vault folder')
-      .setDesc('Where the pages are mirrored to. It must not overlap another subscription.')
-      .addText((text) =>
-        text.setValue(this.mountPath).onChange((value) => {
+      .setDesc(
+        'This folder is the space: the space home page becomes its note and the tree starts ' +
+          'inside it. Defaults to the space key. It must not overlap another subscription.',
+      )
+      .addText((text) => {
+        this.mountInput = text;
+        text.setPlaceholder('EP').setValue(this.mountPath);
+        text.onChange((value) => {
           this.mountPath = value;
-        }),
-      );
+          this.mountEdited = value.trim().length > 0;
+        });
+      });
   }
 
   private renderActions(contentEl: HTMLElement): void {
@@ -156,6 +167,10 @@ export class SubscriptionModal extends Modal {
       this.spaceKey = space.key;
       this.spaceName = space.name;
       this.renderSpaceName();
+
+      if (this.mountEdited) return;
+      this.mountPath = space.key;
+      this.mountInput?.setValue(space.key);
     }).open();
   }
 

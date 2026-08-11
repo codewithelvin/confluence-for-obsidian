@@ -18,7 +18,7 @@ import { SuspensionRegistry } from './sync/suspension';
 import { SyncController } from './sync/sync-controller';
 import { SyncStateStore } from './sync/sync-state';
 import { ConfirmModal } from './ui/confirm-modal';
-import { registerPlaceholderRenderer } from './ui/placeholder-renderer';
+import { describeConstruct, registerPlaceholderRenderer } from './ui/placeholder-renderer';
 import { StatusBar } from './ui/status-bar';
 import { SYNC_PANEL_VIEW_TYPE, SyncPanelView } from './ui/sync-panel-view';
 import { newId } from './util/id';
@@ -108,18 +108,7 @@ export default class ConfluenceConnectorPlugin extends Plugin {
       },
     });
 
-    registerPlaceholderRenderer({
-      register: (language, handler) => {
-        this.registerMarkdownCodeBlockProcessor(language, (source, element, context) => {
-          handler(source, element, context.sourcePath);
-        });
-      },
-      pageUrlFor: (sourcePath) => this.controller.pageUrlFor(sourcePath),
-      openExternal: (url) => {
-        window.open(url, '_blank');
-      },
-    });
-
+    this.registerPlaceholders();
     this.startStatusBar();
 
     if (!this.credentials.persistenceAvailable) {
@@ -153,6 +142,35 @@ export default class ConfluenceConnectorPlugin extends Plugin {
       suspensions: this.suspensions,
       startSync: (subscription) => {
         this.startSync(subscription);
+      },
+    });
+  }
+
+  /** Block widgets and inline pills for preserved content (spec FR-4.5). */
+  private registerPlaceholders(): void {
+    registerPlaceholderRenderer({
+      register: (language, handler) => {
+        this.registerMarkdownCodeBlockProcessor(language, (source, element, context) => {
+          handler(source, element, context.sourcePath);
+        });
+      },
+      registerInline: (handler) => {
+        this.registerMarkdownPostProcessor((element, context) =>
+          handler(element, context.sourcePath),
+        );
+      },
+      pageUrlFor: (sourcePath) => this.controller.pageUrlFor(sourcePath),
+      labelsFor: async (sourcePath) => {
+        const fragments = await this.controller.fragmentsFor(sourcePath);
+        return new Map(
+          [...fragments.values()].map((fragment) => [
+            fragment.id,
+            describeConstruct(fragment.name, fragment.type),
+          ]),
+        );
+      },
+      openExternal: (url) => {
+        window.open(url, '_blank');
       },
     });
   }

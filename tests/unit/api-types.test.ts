@@ -42,7 +42,7 @@ describe('parseSpace', () => {
     const result = parseSpace({ key: 'ENG', name: 'Engineering', type: 'global' });
     expect(result).toEqual({
       ok: true,
-      value: { key: 'ENG', name: 'Engineering', type: 'global' },
+      value: { key: 'ENG', name: 'Engineering', type: 'global', homepageId: null },
     });
   });
 

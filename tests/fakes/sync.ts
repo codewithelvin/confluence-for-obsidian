@@ -157,6 +157,15 @@ export class FakeConfluence implements ConfluenceGateway {
     );
   }
 
+  /** Page the space reports as its home page, which collapses into the mount (D13). */
+  homepageId: string | null = null;
+  homepageError: AppError | null = null;
+
+  spaceHomepageId(): Promise<Result<string | null, AppError>> {
+    if (this.homepageError !== null) return Promise.resolve(err(this.homepageError));
+    return Promise.resolve(ok(this.homepageId));
+  }
+
   listSubtree(): Promise<Result<ConfluencePageRef[], AppError>> {
     if (this.listError !== null) return Promise.resolve(err(this.listError));
     return Promise.resolve(ok(this.pages.map((page) => this.toRef(page))));

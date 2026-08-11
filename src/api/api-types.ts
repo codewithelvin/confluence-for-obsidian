@@ -27,6 +27,14 @@ export interface ConfluenceSpace {
   readonly name: string;
   /** `global` or `personal`. Personal spaces are noisy and filtered by default. */
   readonly type: string;
+  /**
+   * Id of the space's home page — present only when the request asked for
+   * `expand=homepage`, and `null` for a space that has none.
+   *
+   * The home page collapses into the mount folder (D13), so the whole layout of
+   * a whole-space subscription hangs off this one value.
+   */
+  readonly homepageId: string | null;
 }
 
 export interface PagedResult<T> {
@@ -103,6 +111,7 @@ export const parseSpace: Parser<ConfluenceSpace> = (raw) => {
     key,
     name: asNonEmptyString(raw['name']) ?? key,
     type: asNonEmptyString(raw['type']) ?? 'global',
+    homepageId: asNonEmptyString(readPath(raw, 'homepage', 'id')),
   });
 };
 

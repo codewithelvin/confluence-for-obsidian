@@ -46,6 +46,7 @@ export type ConfluenceClientDeps = RequestDeps;
  */
 export interface ConfluenceGateway {
   checkConnection(): Promise<Result<ConnectionCheck, AppError>>;
+  spaceHomepageId(spaceKey: string): Promise<Result<string | null, AppError>>;
   listSubtree(
     spaceKey: string,
     rootPageId: string | null,
@@ -99,6 +100,24 @@ export class ConfluenceClient implements ConfluenceGateway {
       if (version !== null) return version;
     }
     return null;
+  }
+
+  /**
+   * The space's home page id, which becomes the mount's folder note (D13).
+   *
+   * `null` means the space genuinely has no home page — a stable property of the
+   * space, so the layout it produces is stable too. A *failed* request is an
+   * error rather than a `null`: silently treating it as "no home page" would
+   * shift every path in the mount up one level and turn a transient network
+   * blip into a mass file move.
+   */
+  async spaceHomepageId(spaceKey: string): Promise<Result<string | null, AppError>> {
+    const space = await this.runner.json(
+      ENDPOINTS.spaceByKey(spaceKey),
+      { expand: 'homepage' },
+      parseSpace,
+    );
+    return space.ok ? ok(space.value.homepageId) : space;
   }
 
   /** Lists spaces, following pagination to completion (spec FR-2.1). */

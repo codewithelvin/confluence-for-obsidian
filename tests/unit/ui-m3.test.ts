@@ -11,6 +11,7 @@ import {
   describePlaceholder,
   parsePlaceholderFields,
   pageUrlFromCache,
+  decorateInlinePlaceholders,
   registerPlaceholderRenderer,
   renderPlaceholder,
 } from '../../src/ui/placeholder-renderer';
@@ -59,7 +60,9 @@ beforeEach(async () => {
   settings = new SettingsStore(new FakePlugin(app, MANIFEST), logger);
   await settings.load();
   await settings.update({
-    connections: [{ id: 'conn', displayName: 'Corp wiki', baseUrl: 'https://wiki.corp' }],
+    connections: [
+      { id: 'conn', displayName: 'Corp wiki', baseUrl: 'https://wiki.corp', strictMarkup: false },
+    ],
     subscriptions: [SUBSCRIPTION],
   });
 
@@ -127,14 +130,54 @@ describe('placeholder renderer (FR-4.5)', () => {
     registerPlaceholderRenderer({
       register: (language, handler) => {
         registered.push(language);
-        handler(FENCE, host, 'Confluence/ENG/A.md');
+        handler(FENCE, host, 'ENG/A.md');
       },
+      registerInline: () => undefined,
       pageUrlFor: () => null,
+      labelsFor: () => Promise.resolve(new Map()),
       openExternal: () => undefined,
     });
 
     expect(registered).toEqual(['confluence-block']);
     expect(host.textContent).toContain('jira macro');
+  });
+
+  it('replaces an inline sentinel with a pill naming the construct (FR-4.5)', async () => {
+    // A reader must never be shown `{cf:cfb-0007}`. The label comes from the
+    // fragment cache, since the note itself carries only the sentinel.
+    const host = document.createElement('div');
+    host.innerHTML = 'See <code>{cf:cfb-0007}</code> and <code>ordinary()</code>.';
+
+    await decorateInlinePlaceholders(host, 'ENG/A.md', () =>
+      Promise.resolve(new Map([['cfb-0007', 'viewdoc macro']])),
+    );
+
+    expect(host.textContent).toBe('See viewdoc macro and ordinary().');
+    expect(host.querySelector('.confluence-inline-placeholder')?.textContent).toBe('viewdoc macro');
+    // Ordinary inline code is left exactly as it was.
+    expect(host.querySelectorAll('code')).toHaveLength(1);
+  });
+
+  it('falls back to a generic name when the fragment is no longer cached', async () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<code>{cf:cfb-0001}</code>';
+
+    await decorateInlinePlaceholders(host, 'ENG/A.md', () => Promise.resolve(new Map()));
+
+    expect(host.textContent).toBe('Confluence content');
+  });
+
+  it('does not read the fragment cache for a note with no placeholders', async () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<p>Just prose, and <code>some.code()</code>.</p>';
+    let asked = 0;
+
+    await decorateInlinePlaceholders(host, 'ENG/A.md', () => {
+      asked += 1;
+      return Promise.resolve(new Map());
+    });
+
+    expect(asked).toBe(0);
   });
 
   it('reads the page URL out of a note cache, tolerating a missing block', () => {
@@ -231,7 +274,9 @@ describe('sync panel (FR-10.2)', () => {
   });
 
   it('reports everything the last sync wants a decision about', async () => {
-    client.pages = [{ id: '1', title: 'A', storage: '<p>a</p><hr class="y"/>' }];
+    client.pages = [
+      { id: '1', title: 'A', storage: '<p>a</p><hr style="border-top: 1px solid red;"/>' },
+    ];
     const view = panel();
     await view.onOpen();
 

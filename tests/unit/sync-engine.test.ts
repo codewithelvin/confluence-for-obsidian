@@ -17,7 +17,7 @@ const SUBSCRIPTION: Subscription = {
   connectionId: 'conn',
   spaceKey: 'ENG',
   rootPageId: null,
-  mountPath: 'Confluence',
+  mountPath: 'ENG',
   syncComments: true,
 };
 
@@ -48,7 +48,7 @@ beforeEach(async () => {
 
 async function sync(callbacks: SyncCallbacks = {}): Promise<SyncReport> {
   const result = await engine.sync(
-    { subscription: SUBSCRIPTION, client, baseUrl: 'https://wiki.corp' },
+    { subscription: SUBSCRIPTION, client, baseUrl: 'https://wiki.corp', strictMarkup: false },
     callbacks,
   );
   if (!result.ok) throw new Error(`sync failed: ${result.error.userMessage}`);
@@ -56,6 +56,85 @@ async function sync(callbacks: SyncCallbacks = {}): Promise<SyncReport> {
 }
 
 const acceptDeletions = { confirmDeletions: (): Promise<boolean> => Promise.resolve(true) };
+
+describe('the space home page collapses into the mount (decision D13)', () => {
+  it('writes the home page as the mount folder note and its children beside it', async () => {
+    client.homepageId = '1';
+    client.pages = [
+      { id: '1', title: 'E-Portal home' },
+      { id: '2', title: 'Architecture', parentId: '1' },
+    ];
+
+    await sync();
+
+    expect([...vault.files.keys()].sort()).toEqual(['ENG/Architecture.md', 'ENG/ENG.md']);
+  });
+
+  it('keeps the home page title as an alias, since the file name came from the mount', async () => {
+    client.homepageId = '1';
+    client.pages = [{ id: '1', title: 'E-Portal home' }];
+
+    await sync();
+
+    expect(state.forSubscription('sub').pages['1']?.alias).toBe('E-Portal home');
+  });
+
+  it('fails the sync rather than laying the mirror out differently', async () => {
+    // Treating an unreadable home page as "there is no home page" would shift
+    // every path in the mount up one level, turning a network blip into a mass
+    // file move (D13).
+    client.homepageId = '1';
+    client.homepageError = new AppError('NETWORK_UNREACHABLE', 'The space could not be read.');
+    client.pages = [{ id: '1', title: 'E-Portal home' }];
+
+    const result = await engine.sync({
+      subscription: SUBSCRIPTION,
+      client,
+      baseUrl: 'https://wiki.corp',
+      strictMarkup: false,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(vault.files.size).toBe(0);
+  });
+});
+
+describe('links between mirrored pages (FR-4.7)', () => {
+  it('writes a wikilink to a page the same sync is placing', async () => {
+    // The link resolves against the placement being made now, not the index being
+    // replaced — on a first sync there is no index at all.
+    client.pages = [
+      {
+        id: '1',
+        title: 'Architecture',
+        storage: '<p>See <ac:link><ri:page ri:content-title="Data Model"/></ac:link>.</p>',
+      },
+      { id: '2', title: 'Data Model', parentId: '1' },
+    ];
+
+    await sync();
+
+    expect(vault.files.get('ENG/Architecture/Architecture.md')).toContain(
+      '[[ENG/Architecture/Data Model]]',
+    );
+  });
+
+  it('leaves a link to a page outside the mirror as a URL', async () => {
+    client.pages = [
+      {
+        id: '1',
+        title: 'Architecture',
+        storage: '<p>See <ac:link><ri:page ri:content-title="Elsewhere"/></ac:link>.</p>',
+      },
+    ];
+
+    await sync();
+    const note = vault.files.get('ENG/Architecture.md') ?? '';
+
+    expect(note).not.toContain('[[');
+    expect(note).toContain('https://wiki.corp/display/ENG/Elsewhere');
+  });
+});
 
 describe('first sync', () => {
   it('mirrors the subtree into the mount', async () => {
@@ -68,8 +147,8 @@ describe('first sync', () => {
 
     expect(report.pulled).toBe(2);
     expect([...vault.files.keys()].sort()).toEqual([
-      'Confluence/ENG/Architecture/Architecture.md',
-      'Confluence/ENG/Architecture/Data Model.md',
+      'ENG/Architecture/Architecture.md',
+      'ENG/Architecture/Data Model.md',
     ]);
   });
 
@@ -79,7 +158,7 @@ describe('first sync', () => {
 
     const page = state.forSubscription('sub').pages['1'];
     expect(page?.remoteVersion).toBe(4);
-    expect(page?.localPath).toBe('Confluence/ENG/A.md');
+    expect(page?.localPath).toBe('ENG/A.md');
     expect(page?.localHash).toHaveLength(64);
     expect(state.forSubscription('sub').lastSyncedAt).toBe(NOW);
   });
@@ -137,28 +216,28 @@ describe('incremental sync', () => {
     const report = await sync();
 
     expect(report.relocated).toBe(1);
-    expect(vault.files.has('Confluence/ENG/Renamed.md')).toBe(true);
-    expect(vault.files.has('Confluence/ENG/A.md')).toBe(false);
-    expect(state.forSubscription('sub').pages['1']?.localPath).toBe('Confluence/ENG/Renamed.md');
+    expect(vault.files.has('ENG/Renamed.md')).toBe(true);
+    expect(vault.files.has('ENG/A.md')).toBe(false);
+    expect(state.forSubscription('sub').pages['1']?.localPath).toBe('ENG/Renamed.md');
   });
 
   it('leaves a locally edited page untouched and reports it', async () => {
-    vault.files.set('Confluence/ENG/A.md', 'edited by hand\n');
+    vault.files.set('ENG/A.md', 'edited by hand\n');
 
     const report = await sync();
 
     expect(report.localEdits.map((page) => page.pageId)).toEqual(['1']);
-    expect(vault.files.get('Confluence/ENG/A.md')).toBe('edited by hand\n');
+    expect(vault.files.get('ENG/A.md')).toBe('edited by hand\n');
   });
 
   it('reports a conflict without writing when both sides changed', async () => {
-    vault.files.set('Confluence/ENG/A.md', 'edited by hand\n');
+    vault.files.set('ENG/A.md', 'edited by hand\n');
     client.pages = [{ id: '1', title: 'A', version: 2 }];
 
     const report = await sync();
 
     expect(report.conflicts.map((page) => page.pageId)).toEqual(['1']);
-    expect(vault.files.get('Confluence/ENG/A.md')).toBe('edited by hand\n');
+    expect(vault.files.get('ENG/A.md')).toBe('edited by hand\n');
   });
 });
 
@@ -173,7 +252,7 @@ describe('remote deletions (FR-3.5)', () => {
     const report = await sync({ confirmDeletions: () => Promise.resolve(false) });
 
     expect(report.deleted).toBe(0);
-    expect(vault.files.has('Confluence/ENG/A.md')).toBe(true);
+    expect(vault.files.has('ENG/A.md')).toBe(true);
     // Still tracked, so the next sync offers the deletion again.
     expect(state.forSubscription('sub').pages['1']).toBeDefined();
   });
@@ -182,7 +261,7 @@ describe('remote deletions (FR-3.5)', () => {
     const report = await sync();
 
     expect(report.deleted).toBe(0);
-    expect(vault.files.has('Confluence/ENG/A.md')).toBe(true);
+    expect(vault.files.has('ENG/A.md')).toBe(true);
   });
 
   it('trashes the note and forgets the page once confirmed', async () => {
@@ -194,14 +273,14 @@ describe('remote deletions (FR-3.5)', () => {
       },
     });
 
-    expect(shown.map((page) => page.path)).toEqual(['Confluence/ENG/A.md']);
+    expect(shown.map((page) => page.path)).toEqual(['ENG/A.md']);
     expect(report.deleted).toBe(1);
-    expect(vault.trashed).toEqual(['Confluence/ENG/A.md']);
+    expect(vault.trashed).toEqual(['ENG/A.md']);
     expect(state.forSubscription('sub').pages['1']).toBeUndefined();
   });
 
   it('forgets a page that is gone on both sides without asking', async () => {
-    vault.files.delete('Confluence/ENG/A.md');
+    vault.files.delete('ENG/A.md');
     let asked = false;
 
     await sync({
@@ -228,7 +307,7 @@ describe('failure isolation (FR-3.9)', () => {
 
     expect(report.pulled).toBe(1);
     expect(report.failures.map((entry) => entry.pageId)).toEqual(['1']);
-    expect(vault.files.has('Confluence/ENG/B.md')).toBe(true);
+    expect(vault.files.has('ENG/B.md')).toBe(true);
   });
 
   it('keeps going when one page cannot be written', async () => {
@@ -236,7 +315,7 @@ describe('failure isolation (FR-3.9)', () => {
       { id: '1', title: 'A' },
       { id: '2', title: 'B' },
     ];
-    vault.failWrites.add('Confluence/ENG/A.md');
+    vault.failWrites.add('ENG/A.md');
 
     const report = await sync();
 
@@ -255,14 +334,17 @@ describe('failure isolation (FR-3.9)', () => {
 
 describe('fidelity', () => {
   it('writes a page that cannot round-trip and marks it degraded (FR-4.4)', async () => {
-    // A thematic break carries no attributes in Markdown, so the `class` cannot
-    // be reproduced and the page can never be pushed safely.
-    client.pages = [{ id: '1', title: 'A', storage: '<p>a</p><hr class="y"/>' }];
+    // A thematic break carries no attributes in Markdown, so the border cannot be
+    // reproduced and the page can never be pushed safely. A `class` would no
+    // longer do: §6.4.6 drops those, precisely so they stop costing pages a push.
+    client.pages = [
+      { id: '1', title: 'A', storage: '<p>a</p><hr style="border-top: 1px solid red;"/>' },
+    ];
 
     const report = await sync();
 
     expect(report.degraded.map((page) => page.pageId)).toEqual(['1']);
-    expect(vault.files.has('Confluence/ENG/A.md')).toBe(true);
+    expect(vault.files.has('ENG/A.md')).toBe(true);
     expect(state.forSubscription('sub').pages['1']?.fidelity).toBe('degraded');
   });
 });
@@ -296,6 +378,7 @@ describe('preflight', () => {
       subscription: SUBSCRIPTION,
       client,
       baseUrl: 'https://wiki.corp',
+      strictMarkup: false,
     });
 
     expect(!failed.ok && failed.error.code).toBe('AUTH_FAILED');
@@ -309,6 +392,7 @@ describe('preflight', () => {
       subscription: SUBSCRIPTION,
       client,
       baseUrl: 'https://wiki.corp',
+      strictMarkup: false,
     });
 
     expect(!failed.ok && failed.error.code).toBe('AUTH_FAILED');
@@ -322,6 +406,7 @@ describe('preflight', () => {
       subscription: SUBSCRIPTION,
       client,
       baseUrl: 'https://wiki.corp',
+      strictMarkup: false,
     });
 
     expect(!failed.ok && failed.error.code).toBe('VERSION_UNSUPPORTED');
@@ -335,6 +420,7 @@ describe('preflight', () => {
       subscription: SUBSCRIPTION,
       client,
       baseUrl: 'https://wiki.corp',
+      strictMarkup: false,
     });
 
     expect(failed.ok).toBe(false);
@@ -350,6 +436,7 @@ describe('preflight', () => {
       subscription: SUBSCRIPTION,
       client,
       baseUrl: 'https://wiki.corp',
+      strictMarkup: false,
     });
 
     expect(!failed.ok && failed.error.code).toBe('OUT_OF_MOUNT');
@@ -359,11 +446,11 @@ describe('preflight', () => {
 describe('reporting', () => {
   it('names untracked notes found in the mount', async () => {
     client.pages = [{ id: '1', title: 'A' }];
-    vault.addForeignNote('Confluence/ENG/My own notes.md', 'personal\n');
+    vault.addForeignNote('ENG/My own notes.md', 'personal\n');
 
     const report = await sync(acceptDeletions);
 
-    expect(report.untracked).toEqual(['Confluence/ENG/My own notes.md']);
+    expect(report.untracked).toEqual(['ENG/My own notes.md']);
   });
 
   it('names pages whose file name had to be shortened', async () => {
@@ -388,7 +475,7 @@ describe('reporting', () => {
   it('reports a note the user deleted as an orphan, never deleting remotely (D6)', async () => {
     client.pages = [{ id: '1', title: 'A' }];
     await sync();
-    vault.files.delete('Confluence/ENG/A.md');
+    vault.files.delete('ENG/A.md');
 
     const report = await sync();
 

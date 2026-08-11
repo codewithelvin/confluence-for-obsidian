@@ -21,7 +21,7 @@ const DRAFT: SubscriptionDraft = {
   connectionId: 'conn',
   spaceKey: 'ENG',
   rootPageId: null,
-  mountPath: 'Confluence',
+  mountPath: 'ENG',
 };
 
 function subscription(id: string, mountPath: string, spaceKey = 'OPS'): Subscription {
@@ -64,16 +64,14 @@ describe('validateSubscription', () => {
   });
 
   it('rejects a mount that overlaps another subscription (FR-2.5)', () => {
-    const existing = [subscription('other', 'Confluence')];
+    const existing = [subscription('other', 'ENG')];
 
     expect(validateSubscription(DRAFT, existing)?.code).toBe('OUT_OF_MOUNT');
-    expect(
-      validateSubscription({ ...DRAFT, mountPath: 'Confluence/ENG' }, existing),
-    ).not.toBeNull();
+    expect(validateSubscription({ ...DRAFT, mountPath: 'ENG/Sub' }, existing)).not.toBeNull();
   });
 
   it('names the subscription in the way, so the message is actionable', () => {
-    const error = validateSubscription(DRAFT, [subscription('other', 'Confluence', 'OPS')]);
+    const error = validateSubscription(DRAFT, [subscription('other', 'ENG', 'OPS')]);
     expect(error?.userMessage).toContain('OPS');
   });
 
@@ -82,7 +80,7 @@ describe('validateSubscription', () => {
   });
 
   it('lets a subscription keep its own mount while being edited', () => {
-    const existing = [subscription('self', 'Confluence')];
+    const existing = [subscription('self', 'ENG')];
     expect(validateSubscription(DRAFT, existing, 'self')).toBeNull();
   });
 });
@@ -165,7 +163,9 @@ describe('SyncController', () => {
     settings = new SettingsStore(new FakePlugin(new FakeApp(), MANIFEST), logger);
     await settings.load();
     await settings.update({
-      connections: [{ id: 'conn', displayName: 'Corp wiki', baseUrl: 'https://wiki.corp' }],
+      connections: [
+        { id: 'conn', displayName: 'Corp wiki', baseUrl: 'https://wiki.corp', strictMarkup: false },
+      ],
     });
 
     controller = new SyncController({
@@ -215,7 +215,7 @@ describe('SyncController', () => {
 
     await controller.remove(created, false);
 
-    expect(vault.files.has('Confluence/ENG/A.md')).toBe(true);
+    expect(vault.files.has('ENG/A.md')).toBe(true);
     expect(vault.trashed).toHaveLength(0);
     expect(settings.get().subscriptions).toHaveLength(0);
   });
@@ -227,7 +227,7 @@ describe('SyncController', () => {
 
     await controller.remove(created, true);
 
-    expect(vault.trashed).toEqual(['Confluence/ENG']);
+    expect(vault.trashed).toEqual(['ENG']);
     expect(controller.lastSyncedAt(created.id)).toBeNull();
   });
 
@@ -249,7 +249,7 @@ describe('SyncController', () => {
     await controller.sync(created);
     client.fetched.length = 0;
 
-    const result = await controller.pullPage('Confluence/ENG/A.md');
+    const result = await controller.pullPage('ENG/A.md');
 
     expect(result.ok && result.value.pageId).toBe('1');
     expect(client.fetched).toEqual(['1']);
@@ -262,9 +262,9 @@ describe('SyncController', () => {
 
   it('refuses to pull a note with no Confluence identity', async () => {
     await controller.create(DRAFT);
-    vault.addForeignNote('Confluence/ENG/mine.md', 'personal\n');
+    vault.addForeignNote('ENG/mine.md', 'personal\n');
 
-    const result = await controller.pullPage('Confluence/ENG/mine.md');
+    const result = await controller.pullPage('ENG/mine.md');
     expect(!result.ok && result.error.code).toBe('NOT_FOUND');
   });
 
@@ -273,7 +273,7 @@ describe('SyncController', () => {
     client.pages = [{ id: '1', title: 'A' }];
     await controller.sync(created);
 
-    expect(controller.pageUrlFor('Confluence/ENG/A.md')).toContain('pageId=1');
+    expect(controller.pageUrlFor('ENG/A.md')).toContain('pageId=1');
     expect(controller.pageUrlFor('Personal/x.md')).toBeNull();
   });
 

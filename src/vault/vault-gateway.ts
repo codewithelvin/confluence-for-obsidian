@@ -19,6 +19,10 @@ export interface NoteWrite {
   /** Converter output. Carries no frontmatter of its own. */
   readonly body: string;
   readonly identity: ConfluenceIdentity;
+  /** True title to hold in `aliases` when the file name is not it (FR-4.11). */
+  readonly alias: string | null;
+  /** Alias written on the previous sync — the only entry the plugin may remove. */
+  readonly previousAlias: string | null;
 }
 
 /** What a scan of the mount found for one Markdown file. */

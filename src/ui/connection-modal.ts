@@ -15,18 +15,22 @@ export interface ConnectionDraft {
   readonly baseUrl: string;
   /** Empty means "keep the token already stored for this connection". */
   readonly token: string;
+  /** Byte-faithful markup instead of readable notes (spec FR-4.12). */
+  readonly strictMarkup: boolean;
 }
 
 export interface ConnectionModalInitial {
   readonly displayName?: string;
   readonly baseUrl?: string;
   readonly hasStoredToken?: boolean;
+  readonly strictMarkup?: boolean;
 }
 
 export class ConnectionModal extends Modal {
   private displayName: string;
   private rawBaseUrl: string;
   private token = '';
+  private strictMarkup: boolean;
 
   constructor(
     app: App,
@@ -36,6 +40,7 @@ export class ConnectionModal extends Modal {
     super(app);
     this.displayName = initial.displayName ?? '';
     this.rawBaseUrl = initial.baseUrl ?? '';
+    this.strictMarkup = initial.strictMarkup ?? false;
   }
 
   override onOpen(): void {
@@ -92,6 +97,19 @@ export class ConnectionModal extends Modal {
         });
         text.inputEl.type = 'password';
       });
+
+    new Setting(contentEl)
+      .setName('Strict markup')
+      .setDesc(
+        'Keep every scrap of Confluence markup, including the parts it renders as nothing. ' +
+          'Notes are noisier, but pushing a page never rewrites its markup or leaves a diff in ' +
+          'the page history. Leave this off unless you need that.',
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.strictMarkup).onChange((value) => {
+          this.strictMarkup = value;
+        }),
+      );
   }
 
   private renderActions(contentEl: HTMLElement): void {
@@ -128,6 +146,7 @@ export class ConnectionModal extends Modal {
       displayName: name.length > 0 ? name : normalised.value,
       baseUrl: normalised.value,
       token: this.token.trim(),
+      strictMarkup: this.strictMarkup,
     });
     this.close();
   }

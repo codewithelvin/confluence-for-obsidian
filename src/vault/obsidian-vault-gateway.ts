@@ -5,6 +5,7 @@ import { AppError } from '../util/errors';
 import { sha256 } from '../util/hash';
 import { err, ok, type Result } from '../util/result';
 import {
+  applyAlias,
   CONFLUENCE_KEY,
   joinFrontmatter,
   readIdentity,
@@ -114,6 +115,7 @@ export class ObsidianVaultGateway implements VaultGateway {
         file,
         (frontmatter: Record<string, unknown>) => {
           frontmatter[CONFLUENCE_KEY] = toFrontmatterValue(write.identity);
+          applyAlias(frontmatter, write.alias, write.previousAlias);
         },
       );
       return ok(await this.app.vault.read(file));

@@ -4,9 +4,10 @@ import type { Subscription } from '../settings/settings-types';
 import { AppError } from '../util/errors';
 import type { Logger } from '../util/logger';
 import { err, ok, type Result } from '../util/result';
-import { buildPathMap, spaceFolderPath, type PathMap } from '../vault/path-mapper';
-import type { ScannedNote, VaultGateway } from '../vault/vault-gateway';
+import { buildPathMap, type PathMap } from '../vault/path-mapper';
+import type { VaultGateway } from '../vault/vault-gateway';
 import type { FragmentStore } from './fragment-store';
+import { LinkIndex, linkPath, type MirroredPage } from './link-index';
 import { deletePages, pullPages, relocate, type ExecutorDeps } from './pull-executor';
 import { buildPullPlan, type PullPlan } from './pull-planner';
 import { isSuspendingError, type SuspensionRegistry } from './suspension';
@@ -39,6 +40,34 @@ export interface SyncRequest {
   readonly subscription: Subscription;
   readonly client: ConfluenceGateway;
   readonly baseUrl: string;
+  /** The connection's byte-faithful setting, carried to conversion (FR-4.12). */
+  readonly strictMarkup: boolean;
+  /**
+   * Pages other subscriptions already mirror, so a link across spaces can still
+   * become a wikilink (FR-4.7). The engine layers this sync's own placements on
+   * top.
+   */
+  readonly mirrored?: readonly MirroredPage[];
+}
+
+/**
+ * Where every mirrored page lives, for wikilink resolution (FR-4.7).
+ *
+ * This sync's own placements go last so they win: a page being moved right now
+ * must resolve to where it is going, not to where the index still has it.
+ */
+function links(
+  request: SyncRequest,
+  remote: readonly ConfluencePageRef[],
+  paths: PathMap,
+): LinkIndex {
+  const here = remote.flatMap((page) => {
+    const mapped = paths.byId.get(page.id);
+    if (mapped === undefined) return [];
+    return [{ spaceKey: page.spaceKey, title: page.title, path: linkPath(mapped.notePath) }];
+  });
+
+  return new LinkIndex([...(request.mirrored ?? []), ...here]);
 }
 
 export class SyncEngine {
@@ -63,12 +92,34 @@ export class SyncEngine {
     const remote = await this.discover(request, callbacks);
     if (!remote.ok) return this.fail(request, remote.error);
 
-    const folder = spaceFolderPath(request.subscription.mountPath, request.subscription.spaceKey);
+    const root = await this.resolveRoot(request);
+    if (!root.ok) return this.fail(request, root.error);
+
+    const folder = request.subscription.mountPath;
     callbacks.onProgress?.({ phase: 'scanning', done: 0, total: null, detail: folder });
     const local = await this.deps.vault.scan(folder);
     if (!local.ok) return err(local.error);
 
-    return ok(await this.apply(request, this.plan(request, remote.value, local.value), callbacks));
+    const paths = this.mapPaths(request, remote.value, root.value);
+    const plan = buildPullPlan({
+      remote: remote.value,
+      local: local.value,
+      state: this.deps.state.forSubscription(request.subscription.id),
+      paths,
+    });
+
+    return ok(await this.apply(request, plan, links(request, remote.value, paths), callbacks));
+  }
+
+  /**
+   * The page that collapses into the mount folder (D13): the subscription's own
+   * root for a subtree, or the space's home page for a whole space.
+   */
+  private async resolveRoot(request: SyncRequest): Promise<Result<string | null, AppError>> {
+    const explicit = request.subscription.rootPageId;
+    if (explicit !== null) return ok(explicit);
+
+    return request.client.spaceHomepageId(request.subscription.spaceKey);
   }
 
   /** Verifies credentials and version before anything is written (§6.6.2 step 1). */
@@ -129,15 +180,16 @@ export class SyncEngine {
     );
   }
 
-  private plan(
+  private mapPaths(
     request: SyncRequest,
     remote: readonly ConfluencePageRef[],
-    local: readonly ScannedNote[],
-  ): PullPlan {
+    rootPageId: string | null,
+  ): PathMap {
     const previous = this.deps.state.forSubscription(request.subscription.id);
-    const paths: PathMap = buildPathMap(remote, {
+
+    return buildPathMap(remote, {
       mountPath: request.subscription.mountPath,
-      spaceKey: request.subscription.spaceKey,
+      rootPageId,
       vaultPathLength: this.deps.vault.vaultPathLength(),
       keepAsFolderNote: new Set(
         Object.values(previous.pages)
@@ -145,13 +197,12 @@ export class SyncEngine {
           .map((page) => page.pageId),
       ),
     });
-
-    return buildPullPlan({ remote, local, state: previous, paths });
   }
 
   private async apply(
     request: SyncRequest,
     plan: PullPlan,
+    linkIndex: LinkIndex,
     callbacks: SyncCallbacks,
   ): Promise<SyncReport> {
     const executor: ExecutorDeps = {
@@ -160,6 +211,9 @@ export class SyncEngine {
       fragments: this.deps.fragments,
       logger: this.deps.logger,
       baseUrl: request.baseUrl,
+      strictMarkup: request.strictMarkup,
+      resolveTarget: linkIndex.resolveTarget,
+      resolveVaultPath: linkIndex.resolveVaultPath,
       now: this.deps.now,
     };
 

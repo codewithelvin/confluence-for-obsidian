@@ -72,6 +72,8 @@ describe('writeNote', () => {
       path: 'Confluence/ENG/Architecture/Architecture.md',
       body: '# Architecture\n',
       identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
     });
 
     expect(result.ok).toBe(true);
@@ -80,7 +82,13 @@ describe('writeNote', () => {
   });
 
   it('writes the confluence identity into frontmatter', async () => {
-    await gateway.writeNote({ path: 'Confluence/a.md', body: 'text', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'text',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
     const written = contentAt('Confluence/a.md');
 
     expect(written).toContain('confluence:');
@@ -97,20 +105,34 @@ describe('writeNote', () => {
       path: 'Confluence/a.md',
       body: 'text',
       identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
     });
 
     expect(result.ok && result.value).toBe(contentAt('Confluence/a.md'));
   });
 
   it('preserves frontmatter keys the user added (spec FR-4.6)', async () => {
-    await gateway.writeNote({ path: 'Confluence/a.md', body: 'first', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'first',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
     const file = app.vault.getFileByPath('Confluence/a.md');
     if (file === null) throw new Error('note was not created');
     await app.vault.process(file, (content) =>
       content.replace('confluence:', 'reviewed: true\nconfluence:'),
     );
 
-    await gateway.writeNote({ path: 'Confluence/a.md', body: 'second', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'second',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
     const written = contentAt('Confluence/a.md');
 
     expect(written).toContain('reviewed: true');
@@ -119,11 +141,19 @@ describe('writeNote', () => {
   });
 
   it('updates the identity on a rewrite rather than appending a second block', async () => {
-    await gateway.writeNote({ path: 'Confluence/a.md', body: 'x', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'x',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
     await gateway.writeNote({
       path: 'Confluence/a.md',
       body: 'x',
       identity: { ...IDENTITY, version: 9, fidelity: 'degraded' },
+      alias: null,
+      previousAlias: null,
     });
 
     const written = contentAt('Confluence/a.md');
@@ -137,6 +167,8 @@ describe('writeNote', () => {
       path: 'Personal/secret.md',
       body: 'x',
       identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
     });
 
     expect(result.ok).toBe(false);
@@ -152,6 +184,8 @@ describe('writeNote', () => {
       path: 'Confluence/a.md',
       body: 'x',
       identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
     });
 
     expect(!result.ok && result.error.code).toBe('VAULT_WRITE_FAILED');
@@ -161,7 +195,13 @@ describe('writeNote', () => {
 
 describe('scan', () => {
   it('returns hash and identity for tracked notes and null identity for others', async () => {
-    await gateway.writeNote({ path: 'Confluence/tracked.md', body: 'x', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/tracked.md',
+      body: 'x',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
     await app.vault.create('Confluence/untracked.md', 'just a note\n');
 
     const result = await gateway.scan('Confluence');
@@ -209,7 +249,13 @@ describe('scan', () => {
 
 describe('move', () => {
   it('moves a note and creates the destination folder', async () => {
-    await gateway.writeNote({ path: 'Confluence/a.md', body: 'x', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'x',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
 
     const result = await gateway.move('Confluence/a.md', 'Confluence/ENG/Deep/a.md');
 
@@ -220,8 +266,20 @@ describe('move', () => {
 
   it('carries a folder note and its children (decision D9 promotion)', async () => {
     await app.vault.createFolder('Confluence/Old');
-    await gateway.writeNote({ path: 'Confluence/Old/Old.md', body: 'x', identity: IDENTITY });
-    await gateway.writeNote({ path: 'Confluence/Old/Child.md', body: 'y', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/Old/Old.md',
+      body: 'x',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
+    await gateway.writeNote({
+      path: 'Confluence/Old/Child.md',
+      body: 'y',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
 
     const result = await gateway.move('Confluence/Old', 'Confluence/New');
 
@@ -230,7 +288,13 @@ describe('move', () => {
   });
 
   it('refuses a destination outside the mount', async () => {
-    await gateway.writeNote({ path: 'Confluence/a.md', body: 'x', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'x',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
     const result = await gateway.move('Confluence/a.md', 'Personal/a.md');
 
     expect(!result.ok && result.error.code).toBe('OUT_OF_MOUNT');
@@ -242,7 +306,13 @@ describe('move', () => {
   });
 
   it('reports a failed rename', async () => {
-    await gateway.writeNote({ path: 'Confluence/a.md', body: 'x', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'x',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
     Object.defineProperty(app.fileManager, 'renameFile', {
       value: () => Promise.reject(new Error('in use')),
     });
@@ -254,7 +324,13 @@ describe('move', () => {
 
 describe('trash and removeEmptyFolder', () => {
   it('trashes a note', async () => {
-    await gateway.writeNote({ path: 'Confluence/a.md', body: 'x', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'x',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
 
     expect((await gateway.trash('Confluence/a.md')).ok).toBe(true);
     expect(app.vault.getFileByPath('Confluence/a.md')).toBeNull();
@@ -270,7 +346,13 @@ describe('trash and removeEmptyFolder', () => {
   });
 
   it('reports a failed trash', async () => {
-    await gateway.writeNote({ path: 'Confluence/a.md', body: 'x', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/a.md',
+      body: 'x',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
     Object.defineProperty(app.fileManager, 'trashFile', {
       value: () => Promise.reject(new Error('denied')),
     });
@@ -281,7 +363,13 @@ describe('trash and removeEmptyFolder', () => {
 
   it('leaves a folder that still has contents', async () => {
     await app.vault.createFolder('Confluence/Keep');
-    await gateway.writeNote({ path: 'Confluence/Keep/a.md', body: 'x', identity: IDENTITY });
+    await gateway.writeNote({
+      path: 'Confluence/Keep/a.md',
+      body: 'x',
+      identity: IDENTITY,
+      alias: null,
+      previousAlias: null,
+    });
 
     expect((await gateway.removeEmptyFolder('Confluence/Keep')).ok).toBe(true);
     expect(app.vault.getFolderByPath('Confluence/Keep')).not.toBeNull();
