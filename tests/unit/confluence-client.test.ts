@@ -5,6 +5,7 @@ import { AppError } from '../../src/util/errors';
 import { Logger } from '../../src/util/logger';
 import type { HttpResponse } from '../../src/api/http-transport';
 import {
+  bytesResponse,
   jsonResponse,
   recordingTransport,
   repeatingTransport,
@@ -260,5 +261,81 @@ describe('ConfluenceClient concurrency', () => {
 
     expect(transport.requests).toHaveLength(6);
     expect(semaphore.inFlight).toBe(0);
+  });
+});
+
+describe('ConfluenceClient attachments (spec FR-8.1)', () => {
+  const ATTACHMENT = {
+    id: 'att1',
+    title: 'Homepage.jpg',
+    version: { number: 3 },
+    extensions: { fileSize: 2048 },
+    _links: { download: '/download/attachments/1/Homepage.jpg?version=3' },
+  };
+
+  it('expands version and extensions, which the endpoint omits by default', async () => {
+    // Without them there is no version to compare (FR-8.3) and no size to judge
+    // against the limit (FR-8.4).
+    const { client, transport } = makeClient([jsonResponse({ results: [ATTACHMENT] })]);
+
+    const result = await client.listAttachments('123');
+
+    expect(result.ok && result.value).toEqual([
+      {
+        id: 'att1',
+        filename: 'Homepage.jpg',
+        version: 3,
+        size: 2048,
+        downloadPath: '/download/attachments/1/Homepage.jpg?version=3',
+      },
+    ]);
+    expect(transport.requests[0]?.url).toContain('expand=version%2Cextensions');
+  });
+
+  it('reports an unknown size as null rather than zero', async () => {
+    // Zero would read as "empty file" and a naive limit check would skip it.
+    const { title, _links } = ATTACHMENT;
+    const { client } = makeClient([jsonResponse({ results: [{ id: 'a', title, _links }] })]);
+
+    const result = await client.listAttachments('123');
+
+    expect(result.ok && result.value[0]?.size).toBeNull();
+    expect(result.ok && result.value[0]?.version).toBe(0);
+  });
+
+  it('drops an attachment with no download link rather than guessing one', async () => {
+    // `parsePaged` skips an item it cannot read instead of failing the whole page:
+    // one malformed entry must not cost a page its other attachments. The image
+    // then stays a placeholder, which is honest — nothing was downloaded.
+    const { client } = makeClient([
+      jsonResponse({ results: [{ id: 'a', title: 'x.png' }, ATTACHMENT] }),
+    ]);
+
+    const result = await client.listAttachments('123');
+
+    expect(result.ok && result.value.map((attachment) => attachment.filename)).toEqual([
+      'Homepage.jpg',
+    ]);
+  });
+
+  it('returns the bytes, never the text', async () => {
+    // A PNG routed through a string and back is a corrupt PNG.
+    const bytes = [0x89, 0x50, 0x4e, 0x47];
+    const { client, transport } = makeClient([bytesResponse(bytes)]);
+
+    const result = await client.downloadAttachment('/download/attachments/1/a.png?version=3');
+
+    expect(result.ok && [...new Uint8Array(result.value)]).toEqual(bytes);
+    // The path from `_links.download` is used verbatim: it already carries the
+    // version query, and rebuilding it would be guessing at Confluence's form.
+    expect(transport.requests[0]?.url).toBe(`${BASE_URL}/download/attachments/1/a.png?version=3`);
+  });
+
+  it('propagates a download failure rather than writing an empty file', async () => {
+    const { client } = makeClient([jsonResponse({ message: 'gone' }, 404)]);
+
+    const result = await client.downloadAttachment('/download/x.png');
+
+    expect(result.ok).toBe(false);
   });
 });

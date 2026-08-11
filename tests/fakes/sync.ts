@@ -107,10 +107,14 @@ export class FakeVaultGateway implements VaultGateway {
   }
 
   exists(path: string): boolean {
+    // Attachments count, as they do in Obsidian: `getFileByPath` makes no
+    // distinction between a note and a binary. Without them here, FR-8.3 could
+    // never see a downloaded attachment and would fetch every image every sync.
     return (
       this.files.has(path) ||
+      this.binaries.has(path) ||
       this.folders.has(path) ||
-      [...this.files.keys()].some((file) => file.startsWith(`${path}/`))
+      [...this.files.keys(), ...this.binaries.keys()].some((file) => file.startsWith(`${path}/`))
     );
   }
 
@@ -183,6 +187,7 @@ export class FakeConfluence implements ConfluenceGateway {
   readonly failDownload = new Set<string>();
 
   listAttachments(pageId: string): Promise<Result<ConfluenceAttachment[], AppError>> {
+    if (this.listError !== null) return Promise.resolve(err(this.listError));
     return Promise.resolve(ok(this.attachments.get(pageId) ?? []));
   }
 
