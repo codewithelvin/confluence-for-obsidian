@@ -139,3 +139,11 @@ export function hasNamespacedMarkup(element: Element): boolean {
     tagOf(descendant).includes(':'),
   );
 }
+
+/** First element child, skipping text and comments. */
+export function firstElement(element: Element): Element | null {
+  for (const child of childrenOf(element)) {
+    if (child.nodeType === Node.ELEMENT_NODE) return child as Element;
+  }
+  return null;
+}

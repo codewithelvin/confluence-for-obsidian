@@ -74,11 +74,34 @@ describe('an image that stays a placeholder', () => {
     expect(certified(missing)).toBe(true);
   });
 
-  it('stays one for an external image, which is not an attachment at all', () => {
+  it('becomes a real Markdown image for an external URL, which needs no attachment', () => {
+    // Markdown expresses this exactly and Obsidian renders it, so a pill would be
+    // hiding a picture the reader could have had. Fourteen of these sat on the first
+    // live page of space TT — every Jira issue-type icon on a page about issue types.
     const external = image('<ri:url ri:value="https://example.com/x.png"/>');
 
-    expect(convert(external)).toContain('{cf:');
+    expect(convert(external)).toContain('![](https://example.com/x.png)');
     expect(certified(external)).toBe(true);
+  });
+
+  it('stays a placeholder for an external URL carrying more than a size', () => {
+    // A thumbnail cannot be expressed, and the carrier trick used for attachments
+    // does not work on a Markdown image node — the marker would come back attached
+    // to nothing and the preserved attributes would be lost on the way out.
+    const thumbnail =
+      '<ac:image ac:thumbnail="true"><ri:url ri:value="https://example.com/x.png"/></ac:image>';
+
+    expect(convert(thumbnail)).toContain('{cf:');
+    expect(certified(thumbnail)).toBe(true);
+  });
+
+  it('refuses a URL scheme that is not http (§7.4)', () => {
+    // A page body is untrusted input, and this is the one place an attribute from it
+    // would become something the reader can follow.
+    const script = image('<ri:url ri:value="javascript:alert(1)"/>');
+
+    expect(convert(script)).toContain('{cf:');
+    expect(convert(script)).not.toContain('javascript:');
   });
 
   it('stays one when no resolver is supplied at all', () => {

@@ -30,6 +30,7 @@ let vault: FakeVaultGateway;
 let stateGateway: FakeStateGateway;
 let state: SyncStateStore;
 let client: FakeConfluence;
+let settings: SettingsStore;
 let service: PageStructureService;
 
 function tracked(extra: Partial<PageState> & { pageId: string }): PageState {
@@ -87,7 +88,7 @@ beforeEach(async () => {
     { id: '2', title: 'Design', parentId: 'root' },
   ];
 
-  const settings = settingsStore();
+  settings = settingsStore();
   await seedSettings(settings);
   await state.load();
   await state.replace('sub', {
@@ -317,5 +318,50 @@ describe('the parent picker (FR-7.1)', () => {
       'EP/Design/Design.md',
       'EP/EP.md',
     ]);
+  });
+});
+
+describe('publishing at the mount root of a whole-space subscription (FR-7.2, D13)', () => {
+  /** A whole-space subscription: `rootPageId` is null and the home page is discovered. */
+  const WHOLE_SPACE: Subscription = { ...SUBSCRIPTION, rootPageId: null };
+
+  beforeEach(async () => {
+    await settings.update({ subscriptions: [WHOLE_SPACE] });
+  });
+
+  it('creates the page under the home page, not at the top of the space', async () => {
+    // Found on the live TT space. The mount folder *is* the home page's folder (D13),
+    // so a note beside `TT/TT.md` is one of its children — but `rootPageId` is null for
+    // a whole-space subscription, and reading that field put the page several levels
+    // away from where the vault showed it.
+    vault.files.set('EP/Notes.md', 'Some prose I wrote.\n');
+
+    const created = await service.promoteNote('EP/Notes.md');
+
+    expect(created.ok).toBe(true);
+    expect(client.created[0]?.parentId).toBe('root');
+  });
+
+  it('creates a top-level page when the space has no home page at all', async () => {
+    // Nothing claims the mount folder, so a note inside it really is top-level.
+    await state.replace('sub', {
+      lastSyncedAt: null,
+      pages: { '1': tracked({ pageId: '1' }) },
+    });
+    vault.files.set('EP/Notes.md', 'Some prose I wrote.\n');
+
+    const created = await service.promoteNote('EP/Notes.md');
+
+    expect(created.ok).toBe(true);
+    expect(client.created[0]?.parentId).toBeNull();
+  });
+
+  it('still refuses a folder that belongs to no page', async () => {
+    vault.files.set('EP/My Notes/Notes.md', 'Mine.');
+
+    const created = await service.promoteNote('EP/My Notes/Notes.md');
+
+    expect(!created.ok && created.error.code).toBe('NOT_FOUND');
+    expect(client.created).toEqual([]);
   });
 });

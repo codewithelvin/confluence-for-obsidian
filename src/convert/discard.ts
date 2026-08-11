@@ -197,6 +197,41 @@ function isAnchorMacro(element: Element): boolean {
 }
 
 /**
+ * Whether a span's only remaining style is a text colour.
+ *
+ * Background and border *do* show on whitespace — a coloured background on a space
+ * paints a visible sliver — so the whitespace rule below is confined to the one
+ * property that cannot.
+ */
+function colourOnly(element: Element): boolean {
+  const style = element.getAttribute('style');
+  if (style === null || element.attributes.length !== 1) return false;
+
+  return style
+    .split(';')
+    .filter((declaration) => declaration.trim().length > 0)
+    .every((declaration) => declaration.split(':')[0]?.trim().toLowerCase() === 'color');
+}
+
+/**
+ * A colour applied to nothing but whitespace paints nothing (§6.4.6, D14).
+ *
+ * `<span style="color: rgb(255,0,0)"> </span>` renders as one space, exactly like the
+ * space on its own — so the span is markup Confluence itself shows as nothing, which
+ * is the definition D14 gives for discarding it. Four of these survived onto the
+ * first live page of space TT, each one a fragment of raw HTML in the middle of the
+ * user's prose.
+ *
+ * The whitespace stays; only the wrapper goes.
+ */
+function isColouredWhitespace(element: Element): boolean {
+  if (tagOf(element) !== 'span' && tagOf(element) !== 'font') return false;
+  if (!colourOnly(element)) return false;
+
+  return (element.textContent ?? '').trim().length === 0 && !hasContent(element);
+}
+
+/**
  * Whether the element is a wrapper with nothing left to wrap.
  *
  * Only ever true after this pass has already removed the attributes that were
@@ -253,6 +288,10 @@ function clean(node: Node): void {
 
   if (isEmptyWrapper(element)) {
     element.parentNode?.removeChild(element);
+    return;
+  }
+  if (isColouredWhitespace(element)) {
+    unwrap(element);
     return;
   }
   // A span that carried only presentation is now indistinguishable from no span

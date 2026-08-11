@@ -82,13 +82,15 @@ describe('an image sized in both directions (FR-8.2)', () => {
     expect(certified(reversed)).toBe(true);
   });
 
-  it('shows at its natural size when only a height is given', () => {
-    // An embed label is read as a *width*, so a height alone cannot go in it. 549
-    // images in the mirror are this shape: near enough beats not at all, and the
-    // carried source keeps the height for Confluence.
+  it('shows a lone height as a width rather than at full size', () => {
+    // An embed label is read as a *width*, so a height alone cannot go in it as one.
+    // Showing it as a width is an approximation; showing no size at all is a
+    // 16-pixel icon filling the line, which is what five of seventeen pictures did
+    // on the first live page of space TT. The carried source keeps the real height
+    // for Confluence, so the approximation is display-only.
     const tall = `<p><ac:image ac:height="400">${ATTACHED}</ac:image></p>`;
 
-    expect(convert(tall)).toBe(`![[${EMBED}]]<!--cf-img:cfb-0001-->`);
+    expect(convert(tall)).toBe(`![[${EMBED}|400]]<!--cf-img:cfb-0001-->`);
     expect(certified(tall)).toBe(true);
   });
 

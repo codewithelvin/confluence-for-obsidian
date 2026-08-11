@@ -1,4 +1,4 @@
-import type { Link, PhrasingContent } from 'mdast';
+import type { Image, Link, PhrasingContent } from 'mdast';
 import {
   CODE_SEPARATOR,
   readCarriedImageId,
@@ -182,6 +182,43 @@ function embedToStorage(link: Wikilink, ctx: ReverseContext): string {
 }
 
 /**
+ * Markdown's own `![](url)` syntax, back to the `ac:image` it came from.
+ *
+ * Not an Obsidian embed — a wikilink embed arrives as *text* and is handled in
+ * `textToStorage`. This form points at a URL, which is exactly what `<ri:url>` is,
+ * so the two are the same thing written two ways.
+ *
+ * The alt text carries the size and nothing else, because that is all the forward
+ * pass ever puts there. A real caption cannot go into an `ac:image` this way, so it
+ * is reported rather than dropped: `![diagram](…)` makes the page read-only until the
+ * caption is removed, which is FR-5.2 refusing to change the user's words on the way
+ * out. A relative URL is not an image Confluence can reach at all — the file would
+ * have to be uploaded first, which is FR-8.6's job on an *embed*, not this.
+ */
+function imageToStorage(node: Image, ctx: ReverseContext): string {
+  if (!/^https?:\/\//i.test(node.url)) {
+    ctx.unsupported.add('an embedded image');
+    return '';
+  }
+
+  const alt = node.alt ?? '';
+  const size = alt.length === 0 ? null : parseEmbedSize(alt.replace(/^\|/, ''));
+  if (alt.length > 0 && size === null) {
+    ctx.unsupported.add('an image with a caption');
+    return '';
+  }
+
+  const height = size?.height ?? null;
+  const attributes =
+    size === null
+      ? ''
+      : ` ac:width="${escapeAttribute(size.width)}"` +
+        (height === null ? '' : ` ac:height="${escapeAttribute(height)}"`);
+
+  return `<ac:image${attributes}>` + `<ri:url ri:value="${escapeAttribute(node.url)}"/></ac:image>`;
+}
+
+/**
  * Text, with any wikilink or embed in it converted.
  *
  * Both arrive as text because Markdown has no such syntax — `[[x]]` is a link
@@ -315,11 +352,7 @@ export function phrasingToStorage(nodes: readonly PhrasingContent[], ctx: Revers
         output += htmlToStorage(node.value, nodes[index - 1], ctx);
         break;
       case 'image':
-        // Markdown's own `![](url)` syntax, not an Obsidian embed: a wikilink
-        // embed arrives as text and is handled in `textToStorage`. This form
-        // points at a URL rather than at an attachment, so writing it back would
-        // need an upload (FR-8.6). Reported rather than silently dropped.
-        ctx.unsupported.add('an embedded image');
+        output += imageToStorage(node, ctx);
         break;
       case 'imageReference':
       case 'linkReference':

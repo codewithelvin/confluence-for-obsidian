@@ -46,21 +46,32 @@ export function parentOfPath(
   notePath: string,
 ): Result<string | null, AppError> {
   const folder = parentPath(notePath);
-  if (folder === subscription.mountPath) return ok(subscription.rootPageId);
 
+  // The folder's own note names the parent, and the mount is no exception: the root
+  // page collapses into it (D13), so `<mount>/<mount>.md` is the folder note of the
+  // mount and a note beside it is one of that page's children.
+  //
+  // Asking the *index* rather than `subscription.rootPageId` matters, because that
+  // field is `null` for a whole-space subscription — the root page is the space's
+  // home page, discovered at sync time. Reading the field would create every note
+  // published at the mount root at the top of the space instead of under the home
+  // page, several levels from where the vault shows it.
   const owner = Object.values(state.forSubscription(subscription.id).pages).find(
     (page) => page.isFolderNote && parentPath(page.localPath) === folder,
   );
-  if (owner === undefined) {
-    return err(
-      new AppError(
-        'NOT_FOUND',
-        `"${folder}" is not a Confluence page, so there is no page to create this one under. ` +
-          'Move the note into a folder that holds a page note of the same name.',
-      ),
-    );
-  }
-  return ok(owner.pageId);
+  if (owner !== undefined) return ok(owner.pageId);
+
+  // No folder note for the mount means the space genuinely has no home page (§6.5),
+  // and a note directly inside it really is a top-level page.
+  if (folder === subscription.mountPath) return ok(subscription.rootPageId);
+
+  return err(
+    new AppError(
+      'NOT_FOUND',
+      `"${folder}" is not a Confluence page, so there is no page to create this one under. ` +
+        'Move the note into a folder that holds a page note of the same name.',
+    ),
+  );
 }
 
 /**
