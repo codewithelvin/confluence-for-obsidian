@@ -6,6 +6,7 @@ import {
   inlinePlaceholderValue,
   type PlaceholderRegistry,
 } from './placeholder-registry';
+import type { FragmentKind } from './types';
 import {
   FAITHFUL,
   serialiseElement,
@@ -80,6 +81,30 @@ export function makeInlineClose(
     label: `end of ${collapse(detail.label)}`,
   });
   return { type: 'inlineCode', value: inlinePlaceholderValue(fragment) };
+}
+
+/**
+ * Preserves an element's source without standing in for it, returning the
+ * fragment id so the caller can attach it to content of its own.
+ *
+ * Used where the construct *can* be shown — an attached image whose sizing or
+ * border an embed cannot express — so the reader gets the picture and Confluence
+ * still gets its markup back untouched. The alternative on both sides is worse:
+ * an honest label nobody can see through, or a silent loss of the border.
+ */
+export function preserveBeside(
+  registry: PlaceholderRegistry,
+  element: Element,
+  detail: PlaceholderDetail,
+  kind: FragmentKind = 'inline',
+): string {
+  return registry.add({
+    kind,
+    xhtml: serialiseElement(element, FAITHFUL),
+    type: detail.type,
+    name: detail.name ?? null,
+    label: collapse(detail.label),
+  }).id;
 }
 
 export function makeInlinePlaceholder(

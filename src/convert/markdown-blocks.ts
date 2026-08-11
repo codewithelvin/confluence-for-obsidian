@@ -10,9 +10,20 @@ import type {
   TableCell,
 } from 'mdast';
 import { isParamsOnly, parseMacroParams } from './macro-params';
-import { BLOCK_FENCE_LANGUAGE, readBlockPlaceholderId } from './placeholder-registry';
+import {
+  BLOCK_FENCE_LANGUAGE,
+  readBlockPlaceholderId,
+  readCarriedPreId,
+} from './placeholder-registry';
 import { escapeText } from './storage-serialiser';
-import { ROW_HEADER_MARKER } from './storage-tables';
+import {
+  LAYOUT_CELL,
+  LAYOUT_CLOSE,
+  LAYOUT_OPEN,
+  LAYOUT_SECTION,
+  restoreCommentAnchors,
+  ROW_HEADER_MARKER,
+} from './storage-tables';
 import type { ReverseContext } from './types';
 
 /**
@@ -45,6 +56,19 @@ function plainTextBody(value: string): string {
   return `<ac:plain-text-body>${body}</ac:plain-text-body>`;
 }
 
+/**
+ * A preserved block's source, or `''` with the id recorded — which fails the
+ * whole conversion rather than pushing a page with a hole in it.
+ */
+function inflateBlock(id: string, ctx: ReverseContext): string {
+  const fragment = ctx.fragments.get(id);
+  if (fragment === undefined) {
+    ctx.missingFragments.add(id);
+    return '';
+  }
+  return fragment.xhtml;
+}
+
 function codeToStorage(node: Code, ctx: ReverseContext): string {
   if (node.lang === BLOCK_FENCE_LANGUAGE) {
     const id = readBlockPlaceholderId(node.value);
@@ -52,12 +76,7 @@ function codeToStorage(node: Code, ctx: ReverseContext): string {
       ctx.unsupported.add('a confluence-block placeholder with no readable id');
       return '';
     }
-    const fragment = ctx.fragments.get(id);
-    if (fragment === undefined) {
-      ctx.missingFragments.add(id);
-      return '';
-    }
-    return fragment.xhtml;
+    return inflateBlock(id, ctx);
   }
 
   if (!isParamsOnly(node.meta)) {
@@ -228,10 +247,98 @@ function tableToStorage(node: Table, ctx: ReverseContext): string {
   return `<table><tbody>${rows}</tbody></table>`;
 }
 
+/** The marker text of an `html` node, or `null` for anything else. */
+function markerOf(node: RootContent | undefined): string | null {
+  return node?.type === 'html' ? node.value.trim() : null;
+}
+
+/**
+ * Rebuilds `ac:layout` from the markers the forward pass left behind
+ * (spec §6.4.8).
+ *
+ * Returns where the layout ended, so the caller resumes after it. An unclosed
+ * layout — a user deleted the end marker — consumes the rest of the body rather
+ * than silently dropping it; the re-parse guard in `markdownToStorage` then
+ * catches any malformed result before it can reach Confluence.
+ */
+function layoutToStorage(
+  nodes: readonly RootContent[],
+  start: number,
+  ctx: ReverseContext,
+): { storage: string; next: number } {
+  const sections: { type: string; cells: RootContent[][] }[] = [];
+  let index = start + 1;
+
+  for (; index < nodes.length; index += 1) {
+    const node = nodes[index];
+    if (node === undefined) break;
+
+    const marker = markerOf(node);
+    if (marker === LAYOUT_CLOSE) {
+      index += 1;
+      break;
+    }
+    if (marker?.startsWith(LAYOUT_SECTION) === true) {
+      const type = marker.slice(LAYOUT_SECTION.length, -'-->'.length);
+      sections.push({ type, cells: [] });
+      continue;
+    }
+    if (marker === LAYOUT_CELL) {
+      sections[sections.length - 1]?.cells.push([]);
+      continue;
+    }
+
+    const cells = sections[sections.length - 1]?.cells;
+    cells?.[cells.length - 1]?.push(node);
+  }
+
+  const body = sections
+    .map((section) => {
+      const cells = section.cells
+        .map((blocks) => `<ac:layout-cell>${ctx.blocks(blocks)}</ac:layout-cell>`)
+        .join('');
+      return `<ac:layout-section ac:type="${escapeText(section.type)}">${cells}</ac:layout-section>`;
+    })
+    .join('');
+
+  return { storage: `<ac:layout>${body}</ac:layout>`, next: index };
+}
+
+/**
+ * A raw HTML block: a table the forward pass wrote out as itself, a layout
+ * marker, or HTML the user typed. Storage format is XHTML, so it goes back as it
+ * is — apart from the inline-comment anchors, which travelled as HTML comments so
+ * that Obsidian would not swallow the words they highlight.
+ */
+function htmlBlockToStorage(
+  value: string,
+  previous: RootContent | undefined,
+  ctx: ReverseContext,
+): string {
+  const carried = readCarriedPreId(value);
+  if (carried === null) return restoreCommentAnchors(value);
+
+  // The fence above has already used it — unless the user deleted the fence, in
+  // which case the block goes back rather than disappearing.
+  return previous?.type === 'code' ? '' : inflateBlock(carried, ctx);
+}
+
 export function blocksToStorage(nodes: readonly RootContent[], ctx: ReverseContext): string {
   let output = '';
 
-  for (const node of nodes) {
+  for (let position = 0; position < nodes.length; position += 1) {
+    const node = nodes[position];
+    if (node === undefined) continue;
+
+    // A layout spans many blocks, so it is consumed as a range rather than one
+    // node at a time.
+    if (markerOf(node) === LAYOUT_OPEN) {
+      const layout = layoutToStorage(nodes, position, ctx);
+      output += layout.storage;
+      position = layout.next - 1;
+      continue;
+    }
+
     switch (node.type) {
       case 'paragraph':
         output += `<p>${ctx.phrasing(node.children)}</p>`;
@@ -242,9 +349,14 @@ export function blocksToStorage(nodes: readonly RootContent[], ctx: ReverseConte
       case 'thematicBreak':
         output += '<hr/>';
         break;
-      case 'code':
-        output += codeToStorage(node, ctx);
+      case 'code': {
+        // A fence the forward pass wrote for a `<pre>` is marked by the comment
+        // after it, and goes back as the block it came from rather than as the
+        // code macro a bare fence would otherwise become.
+        const carried = readCarriedPreId(markerOf(nodes[position + 1]) ?? '');
+        output += carried === null ? codeToStorage(node, ctx) : inflateBlock(carried, ctx);
         break;
+      }
       case 'blockquote':
         output += blockquoteToStorage(node, ctx);
         break;
@@ -255,7 +367,7 @@ export function blocksToStorage(nodes: readonly RootContent[], ctx: ReverseConte
         output += tableToStorage(node, ctx);
         break;
       case 'html':
-        output += node.value;
+        output += htmlBlockToStorage(node.value, nodes[position - 1], ctx);
         break;
       case 'definition':
       case 'footnoteDefinition':

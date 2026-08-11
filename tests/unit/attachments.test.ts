@@ -74,15 +74,6 @@ describe('an image that stays a placeholder', () => {
     expect(certified(missing)).toBe(true);
   });
 
-  it('stays one when the image carries an attribute an embed cannot express', () => {
-    // `ac:thumbnail` has no embed form, and inventing one would make the page
-    // read-only for the sake of a picture that renders slightly wrong.
-    const thumbnail = image(ATTACHED, ' ac:thumbnail="true"');
-
-    expect(convert(thumbnail)).toContain('{cf:');
-    expect(certified(thumbnail)).toBe(true);
-  });
-
   it('stays one for an external image, which is not an attachment at all', () => {
     const external = image('<ri:url ri:value="https://example.com/x.png"/>');
 
@@ -95,6 +86,18 @@ describe('an image that stays a placeholder', () => {
 
     expect(convert(image(ATTACHED), bare)).toContain('{cf:');
     expect(certified(image(ATTACHED), bare)).toBe(true);
+  });
+});
+
+describe('an image an embed cannot fully describe', () => {
+  it('shows anyway, with its source carried beside it', () => {
+    // `ac:thumbnail` has no embed form. Preserving the whole image for it hid a
+    // picture whose file was already downloaded; carrying the source in a comment
+    // shows the picture and still hands Confluence back the thumbnail.
+    const thumbnail = image(ATTACHED, ' ac:thumbnail="true"');
+
+    expect(convert(thumbnail)).toBe('![[EP/_attachments/123/Homepage.jpg]]<!--cf-img:cfb-0001-->');
+    expect(certified(thumbnail)).toBe(true);
   });
 });
 

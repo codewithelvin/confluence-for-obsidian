@@ -92,6 +92,12 @@
   word-break: break-word;
 }
 
+.confluence-panel-more {
+  padding-left: var(--size-4-4);
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
 /* --- Preserved content placeholders (M3, FR-4.5) -------------------------- */
 
 .confluence-placeholder {
@@ -122,4 +128,40 @@
 
 .confluence-placeholder-open {
   margin-top: var(--size-4-2);
+}
+
+/*
+ * A table of contents rebuilt from the note's own headings, in place of the
+ * `toc` macro (FR-4.5). Indented by heading level so the shape of the document
+ * is visible at a glance, the way Confluence's own contents list shows it.
+ */
+.confluence-toc {
+  list-style: none;
+  margin: var(--size-4-2) 0;
+  padding-left: 0;
+}
+
+.confluence-toc-item {
+  margin: 0;
+  line-height: var(--line-height-tight);
+}
+
+.confluence-toc-level-1 {
+  padding-left: 0;
+  font-weight: var(--font-semibold);
+}
+.confluence-toc-level-2 {
+  padding-left: var(--size-4-4);
+}
+.confluence-toc-level-3 {
+  padding-left: var(--size-4-8);
+}
+.confluence-toc-level-4 {
+  padding-left: var(--size-4-12);
+}
+.confluence-toc-level-5 {
+  padding-left: var(--size-4-16);
+}
+.confluence-toc-level-6 {
+  padding-left: var(--size-4-18);
 }

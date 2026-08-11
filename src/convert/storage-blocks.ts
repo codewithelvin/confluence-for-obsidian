@@ -1,10 +1,17 @@
 import type { BlockContent, Heading, List, ListItem, RootContent } from 'mdast';
 import { convertMacro } from './macro-handlers';
-import { makeBlockPlaceholder } from './placeholder-factory';
-import { childrenOf, hasNamespacedMarkup, tagOf } from './storage-parser';
+import { makeBlockPlaceholder, preserveBeside } from './placeholder-factory';
+import { carriedPre } from './placeholder-registry';
+import { acAttr, childrenOf, hasNamespacedMarkup, tagOf } from './storage-parser';
 import { FAITHFUL, serialiseElement } from './storage-serialiser';
 import type { ConversionContext } from './types';
-import { convertTable } from './storage-tables';
+import {
+  convertTable,
+  LAYOUT_CELL,
+  LAYOUT_CLOSE,
+  LAYOUT_OPEN,
+  LAYOUT_SECTION,
+} from './storage-tables';
 
 /**
  * Block-level conversion, storage format to mdast (spec §6.4.2).
@@ -221,6 +228,39 @@ function convertHeading(
  * `<li style="list-style-type: none;">`, which a Markdown list cannot carry.
  * Preserving such a list keeps the rest of the page editable.
  */
+/**
+ * A `<pre>` block as a real code fence, with its source carried after it
+ * (spec §6.4.2).
+ *
+ * It used to be preserved whole, for a reason that was never about the reader: a
+ * bare fence is indistinguishable from a code macro with no language, and the
+ * reverse pass has to write one or the other. The marker settles which it was,
+ * so the fence can simply be a fence — and a `<pre>` is about as basic as page
+ * content gets, sitting there as a grey widget saying "preformatted block".
+ *
+ * The fence holds the block's *text*. Inline markup inside a `<pre>` — the grey
+ * `<span>` Confluence wraps around a SQL comment — has no form in a code fence,
+ * which is exactly what the carried source is for.
+ */
+function convertPre(element: Element, ctx: ConversionContext): RootContent[] {
+  const carried = preserveBeside(
+    ctx.placeholders,
+    element,
+    { type: 'preformatted', label: 'preformatted block' },
+    'block',
+  );
+
+  return [
+    {
+      type: 'code',
+      lang: null,
+      meta: null,
+      value: (element.textContent ?? '').replace(/\s+$/, ''),
+    },
+    { type: 'html', value: carriedPre(carried) },
+  ];
+}
+
 function convertListBlock(element: Element, ctx: ConversionContext): RootContent[] {
   // `<ul class="alternate">` carries a bullet style, and item styling marks
   // nested wrappers. Neither survives a Markdown list.
@@ -236,6 +276,45 @@ function convertListBlock(element: Element, ctx: ConversionContext): RootContent
     ];
   }
   return [convertList(element, ctx)];
+}
+
+/**
+ * Unwraps a Confluence page layout, keeping its shape in invisible markers
+ * (spec §6.4.8).
+ *
+ * `ac:layout` is the column structure of a page, and preserving it whole hid
+ * everything inside: 53 of the first 170 pages mirrored from EP and VOEN were
+ * effectively blank to a reader, one of them holding 19 KB of markup behind a
+ * single widget. What is inside is ordinary page content — 238 headings, 205
+ * macros, 100 images — all of which converts natively once unwrapped, so the
+ * reader gets real headings, real embeds and real links instead of a label.
+ *
+ * The columns cannot be reproduced in Obsidian, which has no multi-column
+ * Markdown. Rather than lose them from *Confluence* too, the section and cell
+ * boundaries are recorded as HTML comments — invisible in both Reading View and
+ * Live Preview, the same device that already carries a row header and a task id —
+ * and `markdown-blocks.ts` rebuilds the layout from them on the way back.
+ */
+function convertLayout(element: Element, ctx: ConversionContext): RootContent[] {
+  const blocks: RootContent[] = [marker(LAYOUT_OPEN)];
+
+  for (const section of elementsOf(element)) {
+    if (tagOf(section) !== 'ac:layout-section') continue;
+    blocks.push(marker(`${LAYOUT_SECTION}${acAttr(section, 'type') ?? 'single'}-->`));
+
+    for (const cell of elementsOf(section)) {
+      if (tagOf(cell) !== 'ac:layout-cell') continue;
+      blocks.push(marker(LAYOUT_CELL));
+      blocks.push(...convertMixedContent(childrenOf(cell), ctx));
+    }
+  }
+
+  blocks.push(marker(LAYOUT_CLOSE));
+  return blocks;
+}
+
+function marker(value: string): RootContent {
+  return { type: 'html', value };
 }
 
 function convertBlockElement(element: Element, ctx: ConversionContext): RootContent[] {
@@ -261,16 +340,7 @@ function convertBlockElement(element: Element, ctx: ConversionContext): RootCont
     case 'hr':
       return [{ type: 'thematicBreak' }];
     case 'pre':
-      // Deliberately preserved rather than converted to a fence. A bare fence
-      // is indistinguishable from a code macro with no language, so converting
-      // both would make one of them impossible to reproduce. Confluence writes
-      // code macros, not <pre>, so this path is rare and costs little.
-      return [
-        makeBlockPlaceholder(ctx.placeholders, element, {
-          type: 'preformatted',
-          label: 'preformatted block',
-        }),
-      ];
+      return convertPre(element, ctx);
     case 'table':
       return [convertTable(element, ctx)];
     case 'ac:structured-macro':
@@ -281,12 +351,14 @@ function convertBlockElement(element: Element, ctx: ConversionContext): RootCont
       return element.attributes.length === 0
         ? convertMixedContent(childrenOf(element), ctx)
         : [makeBlockPlaceholder(ctx.placeholders, element, { type: 'div', label: 'styled block' })];
+    case 'ac:layout':
+      return convertLayout(element, ctx);
     default:
       return [
         makeBlockPlaceholder(ctx.placeholders, element, {
-          type: tag === 'ac:layout' ? 'layout' : 'unsupported',
+          type: 'unsupported',
           name: tag,
-          label: tag === 'ac:layout' ? 'page layout' : `${tag} element`,
+          label: `${tag} element`,
         }),
       ];
   }

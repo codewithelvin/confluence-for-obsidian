@@ -307,6 +307,43 @@ function liftEdgeWhitespace(element: Element): void {
 }
 
 /**
+ * Constructs that render their own thing, with no glyphs for emphasis to change.
+ *
+ * A picture is the same pixels bold or not, and a macro draws whatever it draws —
+ * a table of contents, a diagram, an attached file — regardless of the `<strong>`
+ * around it.
+ */
+const OPAQUE_TO_EMPHASIS = new Set(['ac:image', 'ac:structured-macro']);
+
+/**
+ * Removes bold or italic that wraps nothing an emphasis could affect.
+ *
+ * Confluence's editor writes it whenever an author selects a line holding a
+ * picture or a macro and presses Ctrl+B, and it is not free to leave: Markdown
+ * emphasis needs a word to attach to, so `wrap` in `storage-phrasing.ts`
+ * preserves a wordless one whole — taking whatever is inside it along.
+ *
+ * Across the mirror that hid 216 images, every one with its file already
+ * downloaded and sitting unreferenced in `_attachments`, and 41 tables of
+ * contents, behind a label reading "strong without word content". What it must
+ * *not* touch is wordless bold that really is text — `<strong>№</strong>`,
+ * `<strong>.</strong>` — which Markdown genuinely cannot write and which
+ * outnumbers both.
+ */
+function unwrapEmptyEmphasis(element: Element): void {
+  if (!GLYPH_EMPHASIS.has(tagOf(element))) return;
+
+  const significant = childrenOf(element).filter((child) => !isBlankText(child));
+  if (significant.length === 0) return;
+
+  const opaqueOnly = significant.every(
+    (child) =>
+      child.nodeType === Node.ELEMENT_NODE && OPAQUE_TO_EMPHASIS.has(tagOf(child as Element)),
+  );
+  if (opaqueOnly) unwrap(element);
+}
+
+/**
  * Tags that are two spellings of one rendering.
  *
  * Confluence's editor emits both, sometimes side by side in one sentence, and
@@ -369,7 +406,13 @@ function mergeAdjacentInline(parent: Element): void {
 
   for (const child of childrenOf(parent)) {
     if (child.nodeType !== Node.ELEMENT_NODE) {
-      if (!isBlankText(child)) previous = null;
+      // *Any* text ends the run, whitespace included. A space between two bold
+      // runs is the space between two words, and merging across it deleted it:
+      // `<strong>kabineti</strong> <strong>göndərilən</strong>` came out as
+      // `**kabinetigöndərilən**`. Worse, the two sides of the fidelity comparison
+      // lost it alike, so the page still certified while its text was wrong.
+      // Markdown needs no help here — `**a** **b**` is two runs already.
+      previous = null;
       continue;
     }
 
@@ -415,11 +458,39 @@ function tidyWhitespace(element: Element): void {
 }
 
 /**
+ * Removes the paragraph around a macro that stands on its own.
+ *
+ * Confluence writes both `<ac:structured-macro/>` and `<p><ac:structured-macro/></p>`
+ * for a macro occupying a whole line, and renders them the same way — but the
+ * converter reads only the first as a block. In a paragraph the macro goes down
+ * the inline path instead and comes out as `{cf:…}` mid-line, carrying no name,
+ * so nothing downstream can tell a table of contents from a Jira query.
+ *
+ * Restricted to the page body: a paragraph inside a list item or a cell is
+ * load-bearing for those, and this is about macros that already occupy a line.
+ */
+function unwrapParagraphAroundMacro(element: Element): void {
+  if (tagOf(element) !== 'p') return;
+
+  const parent = element.parentNode;
+  if (parent === null || parent.nodeType !== Node.ELEMENT_NODE) return;
+  if (tagOf(parent as Element) !== 'storage-root') return;
+
+  const significant = childrenOf(element).filter((child) => !isBlankText(child));
+  const only = significant.length === 1 ? significant[0] : undefined;
+  if (only === undefined || only.nodeType !== Node.ELEMENT_NODE) return;
+  if (tagOf(only as Element) !== 'ac:structured-macro') return;
+
+  unwrap(element);
+}
+
+/**
  * Every canonicalisation, in the order they depend on each other: structure
  * first, then whitespace, so a trim sees the elements it will actually be next to.
  */
 export function canonicaliseForm(element: Element): void {
   const tag = tagOf(element);
+  unwrapParagraphAroundMacro(element);
   if (tag === 'table') canonicaliseTableSections(element);
   if (tag === 'li') wrapLooseItemContent(element);
 
@@ -433,6 +504,7 @@ export function canonicaliseForm(element: Element): void {
   if (LOOSE_INLINE_HOSTS.has(tag)) wrapLooseItemContent(element, true);
 
   liftEdgeWhitespace(element);
+  unwrapEmptyEmphasis(element);
   mergeAdjacentInline(element);
 
   if (TEXT_BLOCKS.has(tag)) tidyWhitespace(element);

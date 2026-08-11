@@ -63,6 +63,29 @@ const DISCARDABLE_VALUES = new Map([
   ['font-style', new Set(['normal', 'inherit', 'initial'])],
 ]);
 
+/**
+ * Spacing properties whose zero value is the default, and so states nothing.
+ *
+ * A real indent is content — Confluence uses `margin-left: 30.0px` for it — but
+ * `margin-left: 0.0px` is what its editor stamps on every element of a pasted
+ * document. One VOEN support page carries it on the heading, the tables, every
+ * row, cell, paragraph, `<strong>`, `<code>` *and* both lists, and a single
+ * attribute anywhere in a list is enough to preserve the whole list: the page's
+ * two diagnostic checklists reached the reader as "list with item styling".
+ */
+const ZERO_IS_DEFAULT = new Set([
+  'margin',
+  'margin-left',
+  'margin-right',
+  'margin-top',
+  'margin-bottom',
+  'padding',
+  'text-indent',
+]);
+
+/** Zero in any unit, however it is spelled: `0`, `0px`, `0.0px`, `0.00em`. */
+const ZERO = /^0(\.0+)?(px|pt|em|rem|ex|%)?$/;
+
 /** A style declaration, as `property: value`. */
 function keepDeclaration(declaration: string): boolean {
   const separator = declaration.indexOf(':');
@@ -77,6 +100,7 @@ function keepDeclaration(declaration: string): boolean {
 
   if (DISCARDABLE_PROPERTIES.has(property)) return false;
   if (property === 'color') return !DEFAULT_TEXT_COLOURS.has(value);
+  if (ZERO_IS_DEFAULT.has(property) && ZERO.test(value)) return false;
   return DISCARDABLE_VALUES.get(property)?.has(value) !== true;
 }
 

@@ -23,8 +23,18 @@ export interface SyncPanelDeps {
   readonly startSync: (subscription: Subscription) => void;
 }
 
+/**
+ * How many paths a group lists before it stops.
+ *
+ * A space the size of EP produces hundreds of read-only pages and hundreds of
+ * untracked files, and printing every path turned the panel into a scroll of
+ * filenames with the counts — the part anyone acts on — pushed off the top. The
+ * count in the title is the report; the paths are a sample of it.
+ */
+const LIST_LIMIT = 8;
+
 /** A named group of note paths, rendered only when it has members. */
-function renderList(parent: HTMLElement, title: string, items: readonly string[]): void {
+export function renderList(parent: HTMLElement, title: string, items: readonly string[]): void {
   if (items.length === 0) return;
 
   const group = parent.createDiv({ cls: 'confluence-panel-group' });
@@ -34,7 +44,15 @@ function renderList(parent: HTMLElement, title: string, items: readonly string[]
   });
 
   const list = group.createEl('ul', { cls: 'confluence-panel-list' });
-  for (const item of items) list.createEl('li', { text: item });
+  for (const item of items.slice(0, LIST_LIMIT)) list.createEl('li', { text: item });
+
+  const hidden = items.length - LIST_LIMIT;
+  if (hidden > 0) {
+    group.createDiv({
+      cls: 'confluence-panel-more',
+      text: `…and ${String(hidden)} more.`,
+    });
+  }
 }
 
 function summaryOf(report: SyncReport): string {

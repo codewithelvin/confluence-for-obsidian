@@ -56,6 +56,93 @@ export function pageUrlFromCache(cache: FrontmatterSource | null): string | null
   return asNonEmptyString(readPath(cache.frontmatter, CONFLUENCE_KEY, 'url'));
 }
 
+/** A heading in the note being rendered, as Obsidian's metadata cache holds it. */
+export interface NoteHeading {
+  readonly level: number;
+  /** Raw heading text — what an Obsidian heading link has to address. */
+  readonly heading: string;
+}
+
+/**
+ * The readable words in a heading, with its Markdown taken off.
+ *
+ * A contents list is a list of *titles*, and a mirrored heading is rarely plain:
+ * a Confluence page bolds a section number and not its name (`**2.4.** E-portal…`),
+ * pins an inline comment to a phrase (`` `{cf:cfb-0008}`2.2. … ``), or is nothing
+ * but a picture (`<strong><br/>![[…png|1000]]</strong>`). Stripping only the
+ * outer emphasis left all three in the list verbatim.
+ *
+ * Display only. The *link* still addresses the raw heading, which is what
+ * Obsidian resolves a heading reference against.
+ */
+export function headingText(heading: string): string {
+  return (
+    heading
+      // Preserved constructs first: a placeholder is a whole code span and its
+      // id is not a word. Images likewise carry no text to show.
+      .replace(/`\{cf:cfb-\d+\}`/g, '')
+      .replace(/!\[\[[^\]]*\]\]/g, '')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      // Links keep their visible text.
+      .replace(/\[\[([^[\]|]*)\|([^[\]]*)\]\]/g, '$2')
+      .replace(/\[\[([^[\]]*)\]\]/g, '$1')
+      .replace(/\[([^[\]]*)\]\([^)]*\)/g, '$1')
+      // Inline HTML is markup, and a `<br/>` is a space.
+      .replace(/<[^>]*>/g, ' ')
+      // Emphasis runs, and the backticks around ordinary inline code.
+      .replace(/(\*\*|__|~~|==|`)/g, '')
+      // A lone `*` is emphasis; a lone `_` may be inside a word, so it goes only
+      // where a delimiter can be — `snake_case` survives, `_italic_` does not.
+      .replace(/\*/g, '')
+      .replace(/(^|\s)_+|_+(?=\s|$)/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+/**
+ * A real table of contents in place of the `toc` macro (spec FR-4.5).
+ *
+ * Confluence generates its contents list at render time from the page's own
+ * headings, so there is nothing in the storage format to convert — which left 239
+ * pages across the mirror opening with a labelled widget where their navigation
+ * belonged. Obsidian has the same information in its metadata cache, so the list
+ * can simply be built here.
+ *
+ * The macro's parameters are not read. `maxLevel` and the rest change which
+ * headings appear, and a contents list that quietly omits a section is worse than
+ * one that shows all of them; the macro's source is preserved either way, so
+ * Confluence keeps its own rendering untouched.
+ *
+ * `false` when the note has no headings — the cache may not have caught up, and a
+ * heading-less contents list should fall back to saying what it stands for.
+ */
+export function renderTableOfContents(
+  parent: HTMLElement,
+  headings: readonly NoteHeading[],
+): boolean {
+  const entries = headings
+    .map((entry) => ({ level: entry.level, raw: entry.heading, text: headingText(entry.heading) }))
+    // A heading that is only a picture has no title to list. Confluence's own
+    // contents list shows a blank line for it; an omission reads better.
+    .filter((entry) => entry.text.length > 0);
+  if (entries.length === 0) return false;
+
+  const list = parent.createEl('ul', { cls: 'confluence-toc' });
+  for (const entry of entries) {
+    const item = list.createEl('li', {
+      cls: `confluence-toc-item confluence-toc-level-${String(Math.min(entry.level, 6))}`,
+    });
+    // `data-href` is what Obsidian's own link handling reads; the class is what
+    // styles it as a link. Text only — a heading is page content, so it goes in
+    // through `text` and never as markup (§7.4).
+    const link = item.createEl('a', { cls: 'internal-link', text: entry.text });
+    link.setAttribute('href', `#${entry.raw}`);
+    link.setAttribute('data-href', `#${entry.raw}`);
+  }
+  return true;
+}
+
 export interface PlaceholderRendererDeps {
   /** Registers the code-block processor; `Plugin.registerMarkdownCodeBlockProcessor`. */
   readonly register: (
@@ -76,6 +163,8 @@ export interface PlaceholderRendererDeps {
    * outside the Markdown.
    */
   readonly labelsFor: (sourcePath: string) => Promise<ReadonlyMap<string, string>>;
+  /** The note's own headings, for the `toc` macro to list. */
+  readonly headingsFor: (sourcePath: string) => readonly NoteHeading[];
   readonly openExternal: (url: string) => void;
 }
 
@@ -128,8 +217,15 @@ export function renderPlaceholder(
   source: string,
   url: string | null,
   openExternal: (url: string) => void,
+  headings: readonly NoteHeading[] = [],
 ): void {
   const fields = parsePlaceholderFields(source);
+
+  // A contents list is the one preserved construct Obsidian can rebuild from
+  // scratch, because it was never content in the first place — Confluence
+  // generates it from the page's headings, and the note has those too.
+  if (fields.get('name') === 'toc' && renderTableOfContents(element, headings)) return;
+
   const widget = element.createDiv({ cls: 'confluence-placeholder' });
 
   widget.createDiv({ cls: 'confluence-placeholder-title', text: describePlaceholder(fields) });
@@ -157,7 +253,13 @@ export function renderPlaceholder(
 
 export function registerPlaceholderRenderer(deps: PlaceholderRendererDeps): void {
   deps.register(BLOCK_FENCE_LANGUAGE, (source, element, sourcePath) => {
-    renderPlaceholder(element, source, deps.pageUrlFor(sourcePath), deps.openExternal);
+    renderPlaceholder(
+      element,
+      source,
+      deps.pageUrlFor(sourcePath),
+      deps.openExternal,
+      deps.headingsFor(sourcePath),
+    );
   });
 
   deps.registerInline((element, sourcePath) =>

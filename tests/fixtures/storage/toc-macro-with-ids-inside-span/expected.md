@@ -1,1 +1,6 @@
-`{cf:cfb-0001}`
+```confluence-block
+id: cfb-0001
+type: macro
+name: toc
+label: toc macro
+```

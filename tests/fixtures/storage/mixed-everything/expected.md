@@ -16,12 +16,15 @@ Intro with **bold** and a [Other](https://confluence.example.com/display/ENG/Oth
 const x = 1;
 ```
 
-```confluence-block
-id: cfb-0001
-type: layout
-name: ac:layout
-label: page layout
-```
+<!--cf-layout-->
+
+<!--cf-layout-section:single-->
+
+<!--cf-layout-cell-->
+
+Cell
+
+<!--cf-layout-end-->
 
 ---
 

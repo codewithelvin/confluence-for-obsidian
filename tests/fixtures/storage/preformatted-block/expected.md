@@ -1,5 +1,6 @@
-```confluence-block
-id: cfb-0001
-type: preformatted
-label: preformatted block
 ```
+raw   spacing
+  kept
+```
+
+<!--cf-pre:cfb-0001-->

@@ -1,8 +1,18 @@
 import type { Link, PhrasingContent } from 'mdast';
-import { CODE_SEPARATOR, readInlinePlaceholderId } from './placeholder-registry';
+import {
+  CODE_SEPARATOR,
+  readCarriedImageId,
+  readInlinePlaceholderId,
+} from './placeholder-registry';
 import { escapeAttribute, escapeText } from './storage-serialiser';
 import type { ReverseContext } from './types';
-import { formatEmbed, formatWikilink, splitWikilinks, type Wikilink } from './wikilink';
+import {
+  formatEmbed,
+  formatWikilink,
+  parseEmbedSize,
+  splitWikilinks,
+  type Wikilink,
+} from './wikilink';
 
 /**
  * Inline conversion, mdast to storage format.
@@ -12,16 +22,22 @@ import { formatEmbed, formatWikilink, splitWikilinks, type Wikilink } from './wi
  * it did not fully understand.
  */
 
-function inflateInline(value: string, ctx: ReverseContext): string | null {
-  const id = readInlinePlaceholderId(value);
-  if (id === null) return null;
-
+/**
+ * A fragment's source, or `''` with the id recorded — which fails the whole
+ * conversion in `markdownToStorage` rather than pushing a page with a hole in it.
+ */
+function inflateById(id: string, ctx: ReverseContext): string {
   const fragment = ctx.fragments.get(id);
   if (fragment === undefined) {
     ctx.missingFragments.add(id);
     return '';
   }
   return fragment.xhtml;
+}
+
+function inflateInline(value: string, ctx: ReverseContext): string | null {
+  const id = readInlinePlaceholderId(value);
+  return id === null ? null : inflateById(id, ctx);
 }
 
 function wrap(tag: string, children: readonly PhrasingContent[], ctx: ReverseContext): string {
@@ -141,18 +157,24 @@ function wikilinkToStorage(link: Wikilink, ctx: ReverseContext): string {
  *
  * A path that is not a known attachment stays literal text — the user may have
  * embedded a file of their own, and uploading it is FR-8.6, not this. The label
- * is a pixel width or nothing: any other label is not a form this converter
- * produced, so it is left alone rather than guessed at.
+ * is a size or nothing: any other label is not a form this converter produced,
+ * so it is left alone rather than guessed at.
  */
 function embedToStorage(link: Wikilink, ctx: ReverseContext): string {
   const filename = ctx.attachmentFor?.(link.path) ?? null;
-  const width = link.label;
-  const literal = escapeText(formatEmbed(link.path, width));
-
+  const literal = escapeText(formatEmbed(link.path, link.label));
   if (filename === null) return literal;
-  if (width !== null && !/^\d+$/.test(width)) return literal;
 
-  const attributes = width === null ? '' : ` ac:width="${escapeAttribute(width)}"`;
+  const size = link.label === null ? null : parseEmbedSize(link.label);
+  if (link.label !== null && size === null) return literal;
+
+  const height = size?.height ?? null;
+  const attributes =
+    size === null
+      ? ''
+      : ` ac:width="${escapeAttribute(size.width)}"` +
+        (height === null ? '' : ` ac:height="${escapeAttribute(height)}"`);
+
   return (
     `<ac:image${attributes}>` +
     `<ri:attachment ri:filename="${escapeAttribute(filename)}"/></ac:image>`
@@ -165,19 +187,78 @@ function embedToStorage(link: Wikilink, ctx: ReverseContext): string {
  * Both arrive as text because Markdown has no such syntax — `[[x]]` is a link
  * reference with no definition, which CommonMark leaves literal. Text with
  * neither in it, which is nearly all of it, takes the fast path.
+ *
+ * `carried` is the source of an image the embed shows but cannot describe — a
+ * border, a thumbnail, a lone height. It replaces the *last* embed in the text,
+ * which is the one the marker follows.
  */
-function textToStorage(value: string, ctx: ReverseContext): string {
+function textToStorage(value: string, ctx: ReverseContext, carried: string | null = null): string {
   const segments = splitWikilinks(value);
   const first = segments[0];
   if (segments.length === 1 && first?.kind === 'text') return escapeText(value);
 
+  const lastEmbed = segments.reduce(
+    (found, segment, index) => (segment.kind === 'embed' ? index : found),
+    -1,
+  );
+
   return segments
-    .map((segment) => {
+    .map((segment, index) => {
       if (segment.kind === 'text') return escapeText(segment.value);
-      if (segment.kind === 'embed') return embedToStorage(segment.link, ctx);
-      return wikilinkToStorage(segment.link, ctx);
+      if (segment.kind !== 'embed') return wikilinkToStorage(segment.link, ctx);
+      if (carried !== null && index === lastEmbed) return carried;
+      return embedToStorage(segment.link, ctx);
     })
     .join('');
+}
+
+/**
+ * Whether a text node ends in an embed the marker after it could be describing.
+ *
+ * Only the last segment counts: the marker sits immediately behind its own embed,
+ * so anything after that embed means the user has edited between the two and the
+ * pairing can no longer be trusted.
+ */
+function endsInEmbed(node: PhrasingContent | undefined): boolean {
+  if (node?.type !== 'text') return false;
+
+  const segments = splitWikilinks(node.value);
+  return segments[segments.length - 1]?.kind === 'embed';
+}
+
+/**
+ * Raw HTML the user wrote, or a marker this converter emitted.
+ *
+ * Passed through unchanged — storage format is XHTML, so it is already valid —
+ * except for a carried-image marker, which the embed in front of it has normally
+ * already consumed.
+ */
+function htmlToStorage(
+  value: string,
+  previous: PhrasingContent | undefined,
+  ctx: ReverseContext,
+): string {
+  const carried = readCarriedImageId(value);
+  if (carried === null) return value;
+  if (endsInEmbed(previous)) return '';
+
+  // The embed it belonged to is gone — the user deleted the picture and left the
+  // marker. Its source goes back on its own rather than being dropped, so the
+  // image survives an edit that only looked like a deletion, and a real deletion
+  // still shows up in the push diff.
+  return inflateById(carried, ctx);
+}
+
+/** The source to put back in place of a text node's last embed, if one is marked. */
+function carriedSource(
+  marker: PhrasingContent | undefined,
+  text: PhrasingContent,
+  ctx: ReverseContext,
+): string | null {
+  if (marker?.type !== 'html' || !endsInEmbed(text)) return null;
+
+  const id = readCarriedImageId(marker.value);
+  return id === null ? null : inflateById(id, ctx);
 }
 
 /**
@@ -203,9 +284,13 @@ export function phrasingToStorage(nodes: readonly PhrasingContent[], ctx: Revers
     if (isCodeSeparator(nodes, index)) continue;
 
     switch (node.type) {
-      case 'text':
-        output += textToStorage(node.value, ctx);
+      case 'text': {
+        // A carried-image marker describes the embed in front of it, so the text
+        // holding that embed is where its source goes back in.
+        const carried = carriedSource(nodes[index + 1], node, ctx);
+        output += textToStorage(node.value, ctx, carried);
         break;
+      }
       case 'strong':
         output += wrap('strong', node.children, ctx);
         break;
@@ -227,9 +312,7 @@ export function phrasingToStorage(nodes: readonly PhrasingContent[], ctx: Revers
         output += '<br/>';
         break;
       case 'html':
-        // Raw HTML the user wrote, or a marker this converter emitted. Passed
-        // through unchanged; storage format is XHTML, so it is already valid.
-        output += node.value;
+        output += htmlToStorage(node.value, nodes[index - 1], ctx);
         break;
       case 'image':
         // Markdown's own `![](url)` syntax, not an Obsidian embed: a wikilink

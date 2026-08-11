@@ -81,6 +81,45 @@ export function readInlinePlaceholderId(inlineCodeValue: string): string | null 
 }
 
 /**
+ * Marks the embed in front of it as carrying preserved source (spec FR-8.2).
+ *
+ * An HTML comment, so the reader sees the picture and nothing else in either
+ * Obsidian mode — the same device carrying a row header, a layout's shape and an
+ * inline comment's anchor. It follows the embed rather than preceding it because
+ * a line *starting* with `<!--` is an HTML block in CommonMark, which would
+ * swallow the embed on the same line and stop it rendering at all.
+ */
+export function carriedImage(id: string): string {
+  return `<!--cf-img:${id}-->`;
+}
+
+const CARRIED_PATTERN = /^<!--cf-img:(cfb-\d+)-->$/;
+
+/** The fragment id behind a carried-image marker, or `null` for ordinary HTML. */
+export function readCarriedImageId(html: string): string | null {
+  return CARRIED_PATTERN.exec(html.trim())?.[1] ?? null;
+}
+
+/**
+ * Marks the code fence above it as standing for a `<pre>` block.
+ *
+ * A bare fence is otherwise indistinguishable from a code macro with no
+ * language, and the reverse pass has to write one or the other — so a `<pre>`
+ * used to be preserved whole rather than shown. The marker settles which it was,
+ * and the fence can then be a fence.
+ */
+export function carriedPre(id: string): string {
+  return `<!--cf-pre:${id}-->`;
+}
+
+const CARRIED_PRE_PATTERN = /^<!--cf-pre:(cfb-\d+)-->$/;
+
+/** The fragment id behind a carried-`<pre>` marker, or `null` for ordinary HTML. */
+export function readCarriedPreId(html: string): string | null {
+  return CARRIED_PRE_PATTERN.exec(html.trim())?.[1] ?? null;
+}
+
+/**
  * Body of a `confluence-block` fence. Deliberately a flat `key: value` list
  * rather than JSON: it stays readable in the editor, and a user who damages it
  * produces a missing-fragment error rather than silently valid-looking data.

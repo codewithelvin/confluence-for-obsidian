@@ -12,11 +12,12 @@ import {
   parsePlaceholderFields,
   pageUrlFromCache,
   decorateInlinePlaceholders,
+  headingText,
   registerPlaceholderRenderer,
   renderPlaceholder,
 } from '../../src/ui/placeholder-renderer';
 import { StatusBar, statusText } from '../../src/ui/status-bar';
-import { SYNC_PANEL_VIEW_TYPE, SyncPanelView } from '../../src/ui/sync-panel-view';
+import { renderList, SYNC_PANEL_VIEW_TYPE, SyncPanelView } from '../../src/ui/sync-panel-view';
 import { RemoveSubscriptionModal } from '../../src/ui/remove-subscription-modal';
 import { SubscriptionModal } from '../../src/ui/subscription-modal';
 import { FakeConfluence, FakeStateGateway, FakeVaultGateway } from '../fakes/sync';
@@ -135,11 +136,87 @@ describe('placeholder renderer (FR-4.5)', () => {
       registerInline: () => undefined,
       pageUrlFor: () => null,
       labelsFor: () => Promise.resolve(new Map()),
+      headingsFor: () => [],
       openExternal: () => undefined,
     });
 
     expect(registered).toEqual(['confluence-block']);
     expect(host.textContent).toContain('jira macro');
+  });
+
+  describe('the toc macro, rebuilt from the note itself (FR-4.5)', () => {
+    const TOC = 'id: cfb-0001\ntype: macro\nname: toc\nlabel: toc macro';
+    const HEADINGS = [
+      { level: 1, heading: '**MÜNDƏRİCAT**' },
+      { level: 2, heading: '1.1. Sistemin icmalı' },
+    ];
+
+    it('lists the note headings as links instead of a labelled widget', () => {
+      // Confluence generates its contents list at render time, so there is
+      // nothing in the storage format to convert — but Obsidian knows the
+      // headings too, and 239 pages open with one of these.
+      const host = document.createElement('div');
+      renderPlaceholder(host, TOC, null, () => undefined, HEADINGS);
+
+      expect(host.querySelectorAll('a')).toHaveLength(2);
+      expect(host.querySelector('.confluence-placeholder')).toBeNull();
+    });
+
+    it('addresses the raw heading but shows it without its emphasis markers', () => {
+      const host = document.createElement('div');
+      renderPlaceholder(host, TOC, null, () => undefined, HEADINGS);
+
+      const first = host.querySelector('a');
+      expect(first?.textContent).toBe('MÜNDƏRİCAT');
+      expect(first?.getAttribute('data-href')).toBe('#**MÜNDƏRİCAT**');
+    });
+
+    it('lists titles, not the Markdown a mirrored heading is made of', () => {
+      // Every one of these came out of one VOEN specification page's contents
+      // list, verbatim, when only the outer emphasis was stripped.
+      expect(headingText('**2.4.** E-portal-dan AVİS 2-yə məlumat ötürmə servisi.')).toBe(
+        '2.4. E-portal-dan AVİS 2-yə məlumat ötürmə servisi.',
+      );
+      expect(headingText('`{cf:cfb-0008}`2.2. BPMN diagramı`{cf:cfb-0009}`')).toBe(
+        '2.2. BPMN diagramı',
+      );
+      expect(headingText('[[Other Page|A link]] in a heading')).toBe('A link in a heading');
+    });
+
+    it('leaves a word alone that only looks like emphasis', () => {
+      expect(headingText('snake_case and _italic_ here')).toBe('snake_case and italic here');
+    });
+
+    it('omits a heading that is nothing but a picture', () => {
+      // `<strong><br/><br/>![[…png|1000]]</strong>` is a real heading from that
+      // page. There is no title in it to list, and it reached the reader raw.
+      const host = document.createElement('div');
+      renderPlaceholder(host, TOC, null, () => undefined, [
+        { level: 2, heading: '<strong><br/>![[VOEN/_attachments/1/x.png|1000]]</strong>' },
+        { level: 2, heading: 'A real section' },
+      ]);
+
+      expect(host.querySelectorAll('a')).toHaveLength(1);
+      expect(host.textContent).toBe('A real section');
+    });
+
+    it('falls back to the widget when the note has no headings yet', () => {
+      // The metadata cache may not have caught up. A contents list of nothing
+      // says less than a label saying what is preserved.
+      const host = document.createElement('div');
+      renderPlaceholder(host, TOC, null, () => undefined, []);
+
+      expect(host.textContent).toContain('toc macro');
+      expect(host.querySelector('.confluence-toc')).toBeNull();
+    });
+
+    it('leaves every other macro alone', () => {
+      const host = document.createElement('div');
+      renderPlaceholder(host, FENCE, null, () => undefined, HEADINGS);
+
+      expect(host.textContent).toContain('jira macro');
+      expect(host.querySelector('.confluence-toc')).toBeNull();
+    });
   });
 
   it('replaces an inline sentinel with a pill naming the construct (FR-4.5)', async () => {
@@ -252,6 +329,27 @@ describe('sync panel (FR-10.2)', () => {
 
     await view.onClose();
     expect(view.contentEl.childElementCount).toBe(0);
+  });
+
+  it('samples a long list rather than printing every path', () => {
+    // A space the size of EP leaves hundreds of read-only pages and hundreds of
+    // untracked files. Printing them all pushed the counts — the part anyone acts
+    // on — off the top of the panel.
+    const host = document.createElement('div');
+    const paths = Array.from({ length: 340 }, (_, index) => `EP/page-${String(index)}.md`);
+    renderList(host, 'Read-only', paths);
+
+    expect(host.querySelectorAll('li')).toHaveLength(8);
+    expect(host.textContent).toContain('Read-only (340)');
+    expect(host.textContent).toContain('…and 332 more.');
+  });
+
+  it('prints a short list in full, with no trailing note', () => {
+    const host = document.createElement('div');
+    renderList(host, 'Conflicts', ['EP/a.md', 'EP/b.md']);
+
+    expect(host.querySelectorAll('li')).toHaveLength(2);
+    expect(host.textContent).not.toContain('more.');
   });
 
   it('says so when there is nothing subscribed', async () => {

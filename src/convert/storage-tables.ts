@@ -1,6 +1,6 @@
 import type { PhrasingContent, RootContent, Table, TableCell, TableRow } from 'mdast';
 import { makeBlockPlaceholder } from './placeholder-factory';
-import { childrenOf, hasNamespacedMarkup, tagOf } from './storage-parser';
+import { acAttr, childrenOf, hasNamespacedMarkup, tagOf } from './storage-parser';
 import { FAITHFUL, serialiseElement } from './storage-serialiser';
 import type { ConversionContext } from './types';
 
@@ -25,6 +25,20 @@ import type { ConversionContext } from './types';
  * through a GFM checkbox. It is removed again on the way back to storage format.
  */
 export const ROW_HEADER_MARKER = '<!--cf-th-->';
+
+/**
+ * Markers recording a page layout's shape while its content is unwrapped
+ * (spec §6.4.8).
+ *
+ * HTML comments, so a reader never sees them in Reading View or Live Preview, and
+ * the reverse pass rebuilds `ac:layout` from them exactly — a page keeps its
+ * columns in Confluence even though Obsidian cannot show them.
+ */
+export const LAYOUT_OPEN = '<!--cf-layout-->';
+export const LAYOUT_CLOSE = '<!--cf-layout-end-->';
+export const LAYOUT_CELL = '<!--cf-layout-cell-->';
+/** Carries the section's `ac:type`, so `two_equal` survives the round trip. */
+export const LAYOUT_SECTION = '<!--cf-layout-section:';
 
 /** Content that cannot appear inside a GFM table cell. */
 const BLOCK_TAGS = new Set([
@@ -183,6 +197,79 @@ function asCellContent(nodes: readonly PhrasingContent[]): PhrasingContent[] {
 }
 
 /**
+ * An inline comment's anchor, carried through the note as an HTML comment.
+ *
+ * `ac:inline-comment-marker` is where a Confluence inline comment is pinned; it
+ * renders as a yellow highlight over text that is otherwise ordinary. Being
+ * `ac:`-namespaced, it disqualified its whole table from the HTML projection
+ * below: of the mirror's 1 655 preserved tables 162 hold an anchor, and for 107
+ * of them a highlight on two words was the only thing standing between a reader
+ * and the table — including the longest acceptance-criteria table in VOEN's
+ * POS-terminal specification, 16 bullets hidden behind two highlighted phrases.
+ *
+ * An HTML comment is invisible in Reading View and Live Preview, and survives a
+ * round trip through Markdown untouched — the same device already carrying a row
+ * header and a layout's shape. The anchor is therefore *kept*, not dropped:
+ * pushing the page back reinstates the marker exactly, and the comment stays
+ * attached to the words it was written about.
+ */
+const INLINE_COMMENT_MARKER = 'ac:inline-comment-marker';
+const COMMENT_ANCHOR_OPEN = 'cf-comment:';
+const COMMENT_ANCHOR_CLOSE = 'cf-comment-end';
+
+/**
+ * Refs safe to put inside an HTML comment. Confluence writes a UUID; anything
+ * that could close the comment early, or that carries more than a ref, keeps the
+ * marker as it is and the table stays preserved.
+ */
+const SAFE_REF = /^[A-Za-z0-9-]+$/;
+
+/**
+ * A copy of the table with every inline-comment anchor turned into a comment
+ * pair, or `null` when one of them cannot be carried that way.
+ *
+ * A copy rather than the table itself: the original still has to be serialisable
+ * verbatim into a fragment if the projection is refused further down.
+ */
+function hideCommentAnchors(table: Element): Element | null {
+  if (table.getElementsByTagName(INLINE_COMMENT_MARKER).length === 0) return table;
+
+  const clone = table.cloneNode(true) as Element;
+  const document = clone.ownerDocument;
+
+  for (const marker of Array.from(clone.getElementsByTagName(INLINE_COMMENT_MARKER))) {
+    const ref = acAttr(marker, 'ref');
+    const parent = marker.parentNode;
+    if (parent === null) return null;
+    if (marker.attributes.length !== 1 || ref === null || !SAFE_REF.test(ref)) return null;
+
+    parent.insertBefore(document.createComment(`${COMMENT_ANCHOR_OPEN}${ref}`), marker);
+    while (marker.firstChild !== null) parent.insertBefore(marker.firstChild, marker);
+    parent.insertBefore(document.createComment(COMMENT_ANCHOR_CLOSE), marker);
+    parent.removeChild(marker);
+  }
+  return clone;
+}
+
+/**
+ * Puts the inline-comment anchors back, on the way to Confluence.
+ *
+ * The exact inverse of `hideCommentAnchors`, and it has to stay exact: a page
+ * whose table came back without its anchors would no longer reproduce, and
+ * certification would take the push away from it.
+ */
+export function restoreCommentAnchors(html: string): string {
+  if (!html.includes(COMMENT_ANCHOR_OPEN)) return html;
+
+  return html
+    .replace(
+      new RegExp(`<!--${COMMENT_ANCHOR_OPEN}([A-Za-z0-9-]+)-->`, 'g'),
+      `<${INLINE_COMMENT_MARKER} ac:ref="$1">`,
+    )
+    .replace(new RegExp(`<!--${COMMENT_ANCHOR_CLOSE}-->`, 'g'), `</${INLINE_COMMENT_MARKER}>`);
+}
+
+/**
  * A table GFM cannot express, written into the note as the HTML it already is
  * (spec FR-4.10, decision D15).
  *
@@ -194,12 +281,16 @@ function asCellContent(nodes: readonly PhrasingContent[]): PhrasingContent[] {
  * `null` when the table holds `ac:`- or `ri:`-namespaced markup, which Obsidian
  * renders as *nothing* (FR-4.9): writing such a table out would show empty cells
  * where an image or a link belongs, which is worse than an honest placeholder.
+ * An inline comment's anchor is the exception — it wraps ordinary text and can
+ * travel as an HTML comment instead, so it is not what makes a table opaque.
  */
 function tableAsHtml(table: Element): RootContent | null {
-  if (hasNamespacedMarkup(table)) return null;
   if (isIndented(table)) return null;
 
-  return { type: 'html', value: serialiseElement(table, FAITHFUL) };
+  const projected = hideCommentAnchors(table);
+  if (projected === null || hasNamespacedMarkup(projected)) return null;
+
+  return { type: 'html', value: serialiseElement(projected, FAITHFUL) };
 }
 
 /**

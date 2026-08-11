@@ -1,6 +1,16 @@
 import type { PhrasingContent } from 'mdast';
-import { makeInlineClose, makeInlineOpen, makeInlinePlaceholder } from './placeholder-factory';
-import { CODE_SEPARATOR, collapse, readInlinePlaceholderId } from './placeholder-registry';
+import {
+  makeInlineClose,
+  makeInlineOpen,
+  makeInlinePlaceholder,
+  preserveBeside,
+} from './placeholder-factory';
+import {
+  carriedImage,
+  CODE_SEPARATOR,
+  collapse,
+  readInlinePlaceholderId,
+} from './placeholder-registry';
 import { acAttr, childrenOf, riAttr, tagOf } from './storage-parser';
 import {
   FAITHFUL,
@@ -9,7 +19,7 @@ import {
   serialiseStartTag,
 } from './storage-serialiser';
 import type { ConversionContext, PageTarget } from './types';
-import { formatEmbed, formatWikilink, isLinkable } from './wikilink';
+import { embedSize, formatEmbed, formatWikilink, isLinkable } from './wikilink';
 
 /**
  * Inline (phrasing) conversion, storage format to mdast (spec §6.4.2).
@@ -112,31 +122,53 @@ function wikilink(
 }
 
 /**
- * An attached image as an Obsidian embed (spec FR-8.2), or a placeholder.
+ * An attached image as an Obsidian embed (spec FR-8.2).
  *
- * Converted only when the whole construct can be reproduced from the embed
- * alone: a bare `<ac:image>`, or one carrying nothing but `ac:width`, wrapping a
- * `<ri:attachment>` that carries nothing but its file name. `ac:thumbnail`,
- * alignment, borders and captions have no embed form, and guessing at one would
- * make the page read-only for the sake of a picture that renders slightly wrong.
+ * An embed reproduces an `<ac:image>` exactly when the image carries nothing but
+ * the sizing Obsidian can express and wraps an `<ri:attachment>` carrying nothing
+ * but its file name. That is most of them, and they convert cleanly.
  *
- * An attachment that is not on disk stays a placeholder: a broken image is worse
- * than an honest label saying what is preserved.
+ * The rest — `ac:thumbnail`, a border, a caption, a lone height — still *show*,
+ * with their source carried alongside in the fragment cache and marked by a
+ * comment the reader never sees (`carriedImage`). Obsidian draws the picture, and
+ * push hands Confluence back the markup it gave us, down to the border. 1 088
+ * pictures in the mirror are this shape, sequence diagrams and BPMN exports among
+ * them, and every one of them used to be a label.
+ *
+ * An attachment that is *not* on disk is the one case left as a placeholder: a
+ * broken embed is worse than an honest label saying what is preserved. Almost all
+ * of those were skipped for size — see the attachment size limit (FR-8.4).
  */
 function convertImage(element: Element, ctx: ConversionContext): PhrasingContent {
   const resource = firstElement(element);
   const filename = resource === null ? null : riAttr(resource, 'filename');
   const width = element.getAttribute('ac:width');
+  const height = element.getAttribute('ac:height');
+  const sizing = (width === null ? 0 : 1) + (height === null ? 0 : 1);
 
   const reproducible =
     resource !== null &&
     tagOf(resource) === 'ri:attachment' &&
     resource.attributes.length === 1 &&
-    element.attributes.length === (width === null ? 0 : 1);
+    element.attributes.length === sizing &&
+    // A height with no width alongside it: `embedSize` has no form for that, and
+    // an embed labelled with the height alone would come back as a width.
+    (width !== null || height === null);
 
   const path = filename === null ? null : (ctx.resolveAttachment?.(filename) ?? null);
-  if (reproducible && filename !== null && path !== null && isLinkable(path)) {
-    return { type: 'html', value: formatEmbed(path, width) };
+  const embeddable = filename !== null && path !== null && isLinkable(path);
+
+  if (embeddable) {
+    // A lone height gives no label at all — `embedSize` has no form for one — so
+    // the picture shows at its natural size. Closer than not showing.
+    const embed = formatEmbed(path, embedSize(width, height));
+    if (reproducible) return { type: 'html', value: embed };
+
+    const carried = preserveBeside(ctx.placeholders, element, {
+      type: 'image',
+      label: `image: ${filename}`,
+    });
+    return { type: 'html', value: `${embed}${carriedImage(carried)}` };
   }
 
   return makeInlinePlaceholder(ctx.placeholders, element, {

@@ -1,10 +1,1 @@
-[
-  {
-    "id": "cfb-0001",
-    "kind": "block",
-    "xhtml": "<ac:layout><ac:layout-section ac:type=\"two_equal\"><ac:layout-cell><p>Left</p></ac:layout-cell><ac:layout-cell><p>Right</p></ac:layout-cell></ac:layout-section><ac:layout-section ac:type=\"single\"><ac:layout-cell><p>Bottom</p></ac:layout-cell></ac:layout-section></ac:layout>",
-    "type": "layout",
-    "name": "ac:layout",
-    "label": "page layout"
-  }
-]
+[]

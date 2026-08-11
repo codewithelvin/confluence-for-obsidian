@@ -180,6 +180,9 @@ export default class ConfluenceConnectorPlugin extends Plugin {
           ]),
         );
       },
+      // Straight from the metadata cache: Obsidian has already parsed the note,
+      // and re-reading it here would be a second parse of a file it knows.
+      headingsFor: (sourcePath) => this.app.metadataCache.getCache(sourcePath)?.headings ?? [],
       openExternal: (url) => {
         window.open(url, '_blank');
       },

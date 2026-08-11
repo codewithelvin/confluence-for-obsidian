@@ -1,9 +1,9 @@
 [
   {
     "id": "cfb-0001",
-    "kind": "inline",
+    "kind": "block",
     "xhtml": "<ac:structured-macro ac:name=\"toc\" ac:schema-version=\"1\" ac:macro-id=\"d1107842-4d33-4f45-b019-330b05fc8f8c\"/>",
-    "type": "unsupported",
+    "type": "macro",
     "name": "toc",
     "label": "toc macro"
   }

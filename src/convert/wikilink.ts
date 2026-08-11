@@ -32,13 +32,48 @@ export function formatWikilink(path: string, label: string | null): string {
 }
 
 /**
- * Builds `![[path]]`, or `![[path|width]]` for an image Confluence gave a width.
- *
- * Obsidian reads the label of an embed as a pixel width, which is the one piece
- * of `ac:image` sizing that survives the trip in both directions.
+ * Builds `![[path]]`, or `![[path|size]]` for an image Confluence gave a size.
  */
-export function formatEmbed(path: string, width: string | null): string {
-  return width === null ? `![[${path}]]` : `![[${path}|${width}]]`;
+export function formatEmbed(path: string, size: string | null): string {
+  return size === null ? `![[${path}]]` : `![[${path}|${size}]]`;
+}
+
+/** An embed's size, as Obsidian spells it: a pixel width and an optional height. */
+export interface EmbedSize {
+  readonly width: string;
+  readonly height: string | null;
+}
+
+/**
+ * The embed label for an `ac:image`'s sizing, or `null` when it has none.
+ *
+ * Obsidian reads an embed's label as a pixel width, or as `width x height` when
+ * it holds both — between them the two `ac:image` sizings that survive the trip
+ * in both directions. Accepting only the first cost more than it looks: of the
+ * 3 986 images the mirror preserved as placeholders, 2 651 carried a width *and*
+ * a height, and every one of them was hidden behind a label despite its file
+ * already sitting in the vault.
+ *
+ * A height on its own has no embed form. `null` here, so the caller keeps such an
+ * image preserved rather than inventing a width to go with it.
+ */
+export function embedSize(width: string | null, height: string | null): string | null {
+  if (width === null) return null;
+  return height === null ? width : `${width}x${height}`;
+}
+
+/**
+ * Reads an embed label back as a size, or `null` when it is not one.
+ *
+ * Anything else is a label this converter did not write — the user may have
+ * embedded a file of their own and named it — so the reverse pass leaves it alone.
+ */
+export function parseEmbedSize(label: string): EmbedSize | null {
+  const match = /^(\d+)(?:x(\d+))?$/.exec(label);
+  const width = match?.[1];
+  if (match === null || width === undefined) return null;
+
+  return { width, height: match[2] ?? null };
 }
 
 export interface Wikilink {
