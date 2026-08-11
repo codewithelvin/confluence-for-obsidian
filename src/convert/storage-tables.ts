@@ -197,8 +197,28 @@ function asCellContent(nodes: readonly PhrasingContent[]): PhrasingContent[] {
  */
 function tableAsHtml(table: Element): RootContent | null {
   if (hasNamespacedMarkup(table)) return null;
+  if (isIndented(table)) return null;
 
   return { type: 'html', value: serialiseElement(table, FAITHFUL) };
+}
+
+/**
+ * Containers that indent their content in Markdown, where a raw HTML block stops
+ * being reliable.
+ *
+ * A list item or a quote writes its content behind `- ` or `> `, and an HTML block
+ * inside that runs until a blank line — so the lines *after* the table get
+ * swallowed into it and the body no longer reproduces. A placeholder there is
+ * honest; a table that eats the paragraph following it is not.
+ */
+const INDENTING_ANCESTORS = new Set(['li', 'blockquote']);
+
+function isIndented(element: Element): boolean {
+  for (let node = element.parentNode; node !== null; node = node.parentNode) {
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    if (INDENTING_ANCESTORS.has(tagOf(node as Element))) return true;
+  }
+  return false;
 }
 
 export function convertTable(table: Element, ctx: ConversionContext): RootContent {

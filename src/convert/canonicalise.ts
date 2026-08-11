@@ -157,6 +157,16 @@ const ITEM_BLOCKS = new Set([
 ]);
 
 /**
+ * Containers whose direct children the converter treats as a mix of blocks and
+ * loose inline content, gathering each inline run into a paragraph.
+ *
+ * `storage-root` is the body itself; the other two are the places a macro or a
+ * quote holds arbitrary content. Anywhere on this list, an unwrapped inline run
+ * comes back wrapped, so it has to be wrapped before the comparison too.
+ */
+const LOOSE_INLINE_HOSTS = new Set(['storage-root', 'ac:rich-text-body', 'blockquote']);
+
+/**
  * Wraps a list item's loose text in `<p>` when the item also holds a block.
  *
  * Confluence writes both `<li>Step<ul>…</ul></li>` and
@@ -169,12 +179,12 @@ const ITEM_BLOCKS = new Set([
  * Canonicalising on the wrapped form settles it, in the direction Confluence's own
  * editor already writes.
  */
-function wrapLooseItemContent(item: Element): void {
+function wrapLooseItemContent(item: Element, always = false): void {
   const children = childrenOf(item);
   const hasBlock = children.some(
     (child) => child.nodeType === Node.ELEMENT_NODE && ITEM_BLOCKS.has(tagOf(child as Element)),
   );
-  if (!hasBlock) return;
+  if (!hasBlock && !always) return;
 
   let run: Node[] = [];
   const flush = (before: Node | null): void => {
@@ -183,12 +193,11 @@ function wrapLooseItemContent(item: Element): void {
     const paragraph = item.ownerDocument.createElement('p');
     for (const node of run) paragraph.appendChild(node);
     item.insertBefore(paragraph, before);
-    // Trimmed here, because the walk has already passed this position: a
-    // paragraph created now never gets its own visit. Without this, a trailing
-    // space inside it reached the note as `&#x20;` — and `remark-parse` drops
-    // that space when the item has a sub-list, so the page could not round-trip.
-    // Every one of the 104 notes still carrying `&#x20;` was read-only.
-    trimEdgeWhitespace(paragraph);
+    // The full treatment, because the walk has already passed this position and
+    // this paragraph will never get a visit of its own. Giving it only *part* of
+    // the treatment is what left a space after a `<br/>` inside it, which
+    // Markdown then had to write as a line-initial `&#x20;`.
+    tidyWhitespace(paragraph);
     run = [];
   };
 
@@ -388,6 +397,24 @@ function mergeAdjacentInline(parent: Element): void {
 }
 
 /**
+ * Every whitespace rule a text block needs, in one place.
+ *
+ * Extracted because a paragraph this module *creates* never gets its own visit
+ * from the walk — the walk has already passed that position — so it has to be
+ * given the same treatment by hand. Doing that piecemeal is how a leading space
+ * after a `<br/>` survived into 42 notes as `&#x20;`, every one of them
+ * read-only. Anything that builds a text block calls this, not a subset of it.
+ */
+function tidyWhitespace(element: Element): void {
+  // Twice around the edges: removing a break can expose the whitespace that sat
+  // in front of it.
+  trimAroundBreaks(element);
+  trimEdgeWhitespace(element);
+  trimEdgeBreaks(element);
+  trimEdgeWhitespace(element);
+}
+
+/**
  * Every canonicalisation, in the order they depend on each other: structure
  * first, then whitespace, so a trim sees the elements it will actually be next to.
  */
@@ -396,15 +423,17 @@ export function canonicaliseForm(element: Element): void {
   if (tag === 'table') canonicaliseTableSections(element);
   if (tag === 'li') wrapLooseItemContent(element);
 
+  // Loose inline content directly inside a body gains a `<p>` on the way to
+  // Markdown, because a Markdown document has no way to hold a bare inline run —
+  // `convertMixedContent` gathers one into a paragraph. So the reverse pass writes
+  // a `<p>` the original may not have had, and the page cannot round-trip.
+  //
+  // `<ac:image>` alone in a body is the common case: 138 notes in space EP hold an
+  // image embed and 109 of them were read-only for exactly this reason.
+  if (LOOSE_INLINE_HOSTS.has(tag)) wrapLooseItemContent(element, true);
+
   liftEdgeWhitespace(element);
   mergeAdjacentInline(element);
 
-  if (!TEXT_BLOCKS.has(tag)) return;
-
-  // Twice around the edges: removing a break can expose the whitespace that sat
-  // in front of it.
-  trimAroundBreaks(element);
-  trimEdgeWhitespace(element);
-  trimEdgeBreaks(element);
-  trimEdgeWhitespace(element);
+  if (TEXT_BLOCKS.has(tag)) tidyWhitespace(element);
 }

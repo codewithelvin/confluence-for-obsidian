@@ -120,6 +120,44 @@ describe('an anchor title', () => {
   });
 });
 
+describe('a paragraph this converter creates, not Confluence (§6.4.5)', () => {
+  const table = '<table><tbody><tr><td colspan="2">x</td></tr></tbody></table>';
+
+  it('gets every whitespace rule, not a subset of them', () => {
+    // The walk visits children before parents, so a paragraph created during the
+    // parent's visit never gets a visit of its own and has to be treated by hand.
+    // Giving it only edge-trimming left a space *after* a `<br/>` inside it, which
+    // Markdown writes line-initially as `&#x20;` — and all 42 notes carrying one
+    // were read-only.
+    expect(certified(`<ul><li>${table}Open:<br/> A<br/> B<br/> </li></ul>`)).toBe(true);
+  });
+
+  it('wraps a loose inline run at the top of a body', () => {
+    // `<ac:image>` alone in a body is the common case: the forward pass gathers a
+    // loose inline run into a paragraph, so the reverse writes a `<p>` the original
+    // never had. 109 of the 138 notes holding an image embed failed on this.
+    expect(certified('<ac:image><ri:attachment ri:filename="a.png"/></ac:image>')).toBe(true);
+    expect(certified('<p>a</p>loose text at the end')).toBe(true);
+  });
+});
+
+describe('a table written as HTML (D15)', () => {
+  const table = '<table><tbody><tr><td colspan="2">x</td></tr></tbody></table>';
+
+  it('round-trips at the top level, and beside prose', () => {
+    expect(certified(table)).toBe(true);
+    expect(certified(`<p>before</p>${table}<p>after</p>`)).toBe(true);
+  });
+
+  it('stays a placeholder where Markdown would indent it', () => {
+    // Inside a list item or a quote, an HTML block runs until a blank line and
+    // swallows the lines after it, so the body stops reproducing. A placeholder
+    // there is honest; a table that eats the next paragraph is not.
+    expect(certified(`<ul><li>${table}Open:<br/> A</li></ul>`)).toBe(true);
+    expect(certified(`<blockquote>${table}</blockquote>`)).toBe(true);
+  });
+});
+
 describe('table cells', () => {
   it('keeps a line break, which a Markdown table row cannot hold', () => {
     // `remark-stringify` writes a hard break inside a row as a plain space, so the
