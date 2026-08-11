@@ -102,6 +102,12 @@ export async function syncAttachments(
   referenced: ReadonlySet<string>,
   previous: Readonly<Record<string, AttachmentState>>,
 ): Promise<AttachmentOutcome> {
+  // A page whose body names no attachment has nothing to fetch, and asking
+  // Confluence for its listing only to discard every entry costs one round trip
+  // per page — serialised through the four-request cap, that is the difference
+  // between a large space syncing in minutes and in tens of minutes.
+  if (deps.referencedOnly && referenced.size === 0) return EMPTY_ATTACHMENTS;
+
   const listed = await deps.client.listAttachments(page.id);
   if (!listed.ok) {
     return { ...EMPTY_ATTACHMENTS, failures: [failure(page, listed.error)] };

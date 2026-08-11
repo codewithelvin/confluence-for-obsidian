@@ -80,6 +80,27 @@ describe('what gets downloaded', () => {
   });
 });
 
+describe('requests it does not make', () => {
+  it('does not ask for a listing when the body names no attachment', async () => {
+    // One wasted round trip per page, serialised through the four-request cap, is
+    // the difference between a large space syncing in minutes and in tens of them.
+    listed();
+
+    const outcome = await syncAttachments(deps(), PAGE, new Set(), {});
+
+    expect(outcome).toEqual({ attachments: {}, downloaded: 0, skipped: [], failures: [] });
+    expect(client.downloaded).toEqual([]);
+  });
+
+  it('still asks when the setting wants everything, referenced or not', async () => {
+    listed();
+
+    await syncAttachments(deps({ referencedOnly: false }), PAGE, new Set(), {});
+
+    expect(client.downloaded).toEqual(['/download/a.png']);
+  });
+});
+
 describe('what is refused, and why', () => {
   it('skips an oversized attachment with a readable reason (FR-8.4)', async () => {
     listed(30 * 1_048_576);
