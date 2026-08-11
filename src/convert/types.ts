@@ -40,6 +40,17 @@ export interface ConversionOptions {
    * an internal link read-only.
    */
   readonly resolveVaultPath?: (path: string) => PageTarget | null;
+  /**
+   * Vault path of an attachment already downloaded for this page, or `null`
+   * (spec FR-8.1, FR-8.2).
+   *
+   * `null` for anything not on disk — oversized, unreferenced, or not fetched
+   * yet — and the image stays a placeholder. Writing an embed for a file that is
+   * not there would replace a labelled pill with a broken image, which is worse.
+   */
+  readonly resolveAttachment?: (filename: string) => string | null;
+  /** The inverse, for the trip back: which attachment a vault path holds. */
+  readonly attachmentFor?: (path: string) => string | null;
 }
 
 /** A page as Confluence addresses it: space key plus title. */

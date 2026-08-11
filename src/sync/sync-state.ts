@@ -50,6 +50,21 @@ export interface PageState {
   readonly storageHash: string;
   readonly fidelity: Fidelity;
   readonly lastSyncedAt: string;
+  /**
+   * Attachments already downloaded, keyed by their Confluence file name
+   * (spec §6.6.1, FR-8.3).
+   *
+   * The recorded version is what decides whether the bytes need fetching again:
+   * re-downloading every image on every sync would dominate the cost of a space
+   * like EP, which has thousands.
+   */
+  readonly attachments: Readonly<Record<string, AttachmentState>>;
+}
+
+export interface AttachmentState {
+  readonly id: string;
+  readonly version: number;
+  readonly localPath: string;
 }
 
 export interface SubscriptionState {
@@ -67,6 +82,32 @@ export const EMPTY_SUBSCRIPTION: SubscriptionState = { lastSyncedAt: null, pages
 
 export function emptyIndex(): SyncIndex {
   return { schemaVersion: STATE_SCHEMA_VERSION, subscriptions: {} };
+}
+
+/**
+ * Reads the attachment record, dropping any entry that cannot be read.
+ *
+ * A dropped entry means the attachment is treated as absent and fetched again,
+ * which is always safe — the alternative, trusting a half-read record, would
+ * leave a note embedding a file that is not there.
+ */
+function parseAttachments(raw: unknown): Record<string, AttachmentState> {
+  if (!isRecord(raw)) return {};
+  const attachments: Record<string, AttachmentState> = {};
+
+  for (const [filename, value] of Object.entries(raw)) {
+    if (!isRecord(value)) continue;
+    const id = asNonEmptyString(value['id']);
+    const localPath = asNonEmptyString(value['localPath']);
+    if (id === null || localPath === null) continue;
+
+    attachments[filename] = {
+      id,
+      localPath,
+      version: asFiniteNumber(value['version']) ?? 0,
+    };
+  }
+  return attachments;
 }
 
 function parsePageState(raw: unknown): PageState | null {
@@ -88,6 +129,7 @@ function parsePageState(raw: unknown): PageState | null {
     storageHash: asString(raw['storageHash']) ?? '',
     fidelity: raw['fidelity'] === 'degraded' ? 'degraded' : 'certified',
     lastSyncedAt: asString(raw['lastSyncedAt']) ?? '',
+    attachments: parseAttachments(raw['attachments']),
   };
 }
 

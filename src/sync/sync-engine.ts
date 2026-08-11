@@ -6,6 +6,7 @@ import type { Logger } from '../util/logger';
 import { err, ok, type Result } from '../util/result';
 import { buildPathMap, type PathMap } from '../vault/path-mapper';
 import type { VaultGateway } from '../vault/vault-gateway';
+import { attachmentHook } from './attachment-executor';
 import type { FragmentStore } from './fragment-store';
 import { LinkIndex, linkPath, type MirroredPage } from './link-index';
 import { deletePages, pullPages, relocate, type ExecutorDeps } from './pull-executor';
@@ -48,6 +49,9 @@ export interface SyncRequest {
    * top.
    */
   readonly mirrored?: readonly MirroredPage[];
+  /** Attachment settings, from the plugin's own configuration (FR-8.4, FR-8.5). */
+  readonly attachmentLimitBytes: number;
+  readonly attachmentsReferencedOnly: boolean;
 }
 
 /**
@@ -199,13 +203,9 @@ export class SyncEngine {
     });
   }
 
-  private async apply(
-    request: SyncRequest,
-    plan: PullPlan,
-    linkIndex: LinkIndex,
-    callbacks: SyncCallbacks,
-  ): Promise<SyncReport> {
-    const executor: ExecutorDeps = {
+  /** Everything the executor needs, for one subscription's sync. */
+  private executorFor(request: SyncRequest, linkIndex: LinkIndex): ExecutorDeps {
+    return {
       client: request.client,
       vault: this.deps.vault,
       fragments: this.deps.fragments,
@@ -214,9 +214,29 @@ export class SyncEngine {
       strictMarkup: request.strictMarkup,
       resolveTarget: linkIndex.resolveTarget,
       resolveVaultPath: linkIndex.resolveVaultPath,
+      attachments: attachmentHook(
+        {
+          client: request.client,
+          vault: this.deps.vault,
+          logger: this.deps.logger,
+          mountPath: request.subscription.mountPath,
+          sizeLimitBytes: request.attachmentLimitBytes,
+          referencedOnly: request.attachmentsReferencedOnly,
+        },
+        (pageId) =>
+          this.deps.state.forSubscription(request.subscription.id).pages[pageId]?.attachments ?? {},
+      ),
       now: this.deps.now,
     };
+  }
 
+  private async apply(
+    request: SyncRequest,
+    plan: PullPlan,
+    linkIndex: LinkIndex,
+    callbacks: SyncCallbacks,
+  ): Promise<SyncReport> {
+    const executor = this.executorFor(request, linkIndex);
     const failures: SyncFailure[] = [];
     const relocated = await this.relocateAll(executor, plan, failures);
     const deleted = await this.deleteAll(executor, plan, callbacks, failures);
@@ -243,6 +263,8 @@ export class SyncEngine {
       orphans: plan.orphans,
       untracked: plan.untracked,
       truncated: plan.truncated,
+      attachmentsDownloaded: pulled.attachmentsDownloaded,
+      skippedAttachments: pulled.skippedAttachments,
       unmappable: plan.unmappable,
       failures,
       cancelled: callbacks.isCancelled?.() === true,

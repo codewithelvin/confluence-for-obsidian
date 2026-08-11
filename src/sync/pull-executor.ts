@@ -1,15 +1,16 @@
 import type { ConfluenceGateway } from '../api/confluence-client';
 import { certify } from '../convert/round-trip-verifier';
-import type { PageTarget } from '../convert/types';
+import type { ConversionOptions, PageTarget } from '../convert/types';
 import { AppError } from '../util/errors';
 import { sha256 } from '../util/hash';
 import { err, ok, type Result } from '../util/result';
 import type { Logger } from '../util/logger';
 import { pageUrl, type ConfluenceIdentity } from '../vault/frontmatter';
 import { parentPath, type VaultGateway } from '../vault/vault-gateway';
+import type { AttachmentOutcome, SkippedAttachment } from './attachment-executor';
 import type { FragmentStore } from './fragment-store';
 import type { LocalPage, PullItem, RelocateItem } from './pull-planner';
-import type { PageState } from './sync-state';
+import type { AttachmentState, PageState } from './sync-state';
 import type { SyncFailure } from './sync-types';
 
 /**
@@ -34,6 +35,14 @@ export interface ExecutorDeps {
   /** Wikilink resolution, in both directions (spec FR-4.7). */
   readonly resolveTarget: (target: PageTarget) => string | null;
   readonly resolveVaultPath: (path: string) => PageTarget | null;
+  /**
+   * Downloads the page's attachments and reports what is now on disk (FR-8.1).
+   *
+   * Injected rather than called directly so the executor stays a pure applier of
+   * a plan: it decides *when* attachments are needed — before conversion — and
+   * nothing about which ones or how.
+   */
+  readonly attachments: (item: PullItem, storage: string) => Promise<AttachmentOutcome>;
   readonly now: () => string;
 }
 
@@ -41,6 +50,27 @@ export interface PullOutcome {
   readonly states: readonly PageState[];
   readonly degraded: readonly LocalPage[];
   readonly failures: readonly SyncFailure[];
+  readonly attachmentsDownloaded: number;
+  readonly skippedAttachments: readonly SkippedAttachment[];
+}
+
+/** Collected as pages are written, then reported together (FR-3.9). */
+interface PullAccumulator {
+  readonly states: PageState[];
+  readonly degraded: LocalPage[];
+  readonly failures: SyncFailure[];
+  readonly skippedAttachments: SkippedAttachment[];
+  attachmentsDownloaded: number;
+}
+
+function emptyAccumulator(): PullAccumulator {
+  return {
+    states: [],
+    degraded: [],
+    failures: [],
+    skippedAttachments: [],
+    attachmentsDownloaded: 0,
+  };
 }
 
 function failure(pageId: string, title: string, error: AppError): SyncFailure {
@@ -85,6 +115,33 @@ function identityFor(
 }
 
 /**
+ * Everything the converter needs for one page, including how to resolve the
+ * attachments just downloaded for it (FR-8.2).
+ *
+ * Both attachment directions are built from the same record, which is what keeps
+ * them agreeing: a path the forward pass writes is a path the reverse pass reads.
+ */
+function conversionOptions(
+  deps: ExecutorDeps,
+  item: PullItem,
+  attachments: Readonly<Record<string, AttachmentState>>,
+): ConversionOptions {
+  const byPath = new Map<string, string>(
+    Object.entries(attachments).map(([filename, state]) => [state.localPath, filename]),
+  );
+
+  return {
+    baseUrl: deps.baseUrl,
+    spaceKey: item.page.spaceKey,
+    strictMarkup: deps.strictMarkup,
+    resolveTarget: deps.resolveTarget,
+    resolveVaultPath: deps.resolveVaultPath,
+    resolveAttachment: (filename) => attachments[filename]?.localPath ?? null,
+    attachmentFor: (path) => byPath.get(path) ?? null,
+  };
+}
+
+/**
  * Converts and writes one page.
  *
  * Certification never blocks the write (FR-4.4): a page that cannot round-trip
@@ -95,15 +152,18 @@ async function writePage(
   deps: ExecutorDeps,
   item: PullItem,
   storage: string,
-  outcome: { states: PageState[]; degraded: LocalPage[] },
+  outcome: PullAccumulator,
 ): Promise<AppError | null> {
-  const converted = certify(storage, {
-    baseUrl: deps.baseUrl,
-    spaceKey: item.page.spaceKey,
-    strictMarkup: deps.strictMarkup,
-    resolveTarget: deps.resolveTarget,
-    resolveVaultPath: deps.resolveVaultPath,
-  });
+  // Attachments first: the converter can only write an embed for a file already
+  // on disk (FR-8.2), so the download has to happen before the body is converted,
+  // not after it.
+  const attachments = await deps.attachments(item, storage);
+  outcome.attachmentsDownloaded += attachments.downloaded;
+  outcome.skippedAttachments.push(...attachments.skipped);
+  outcome.failures.push(...attachments.failures);
+
+  const byFilename = attachments.attachments;
+  const converted = certify(storage, conversionOptions(deps, item, byFilename));
   if (!converted.ok) return converted.error;
 
   const fidelity = converted.value.certified ? 'certified' : 'degraded';
@@ -133,6 +193,7 @@ async function writePage(
     localPath: item.path,
     isFolderNote: item.isFolderNote,
     alias: item.alias,
+    attachments: byFilename,
     localHash: await sha256(written.value),
     storageHash,
     fidelity,
@@ -158,8 +219,7 @@ export async function pullPages(
   items: readonly PullItem[],
   progress: PullProgress = {},
 ): Promise<PullOutcome> {
-  const outcome = { states: [] as PageState[], degraded: [] as LocalPage[] };
-  const failures: SyncFailure[] = [];
+  const outcome = emptyAccumulator();
   let done = 0;
 
   for (let index = 0; index < items.length; index += FETCH_BATCH) {
@@ -175,14 +235,14 @@ export async function pullPages(
       const error = result.ok
         ? await writePage(deps, item, result.value.storage, outcome)
         : result.error;
-      if (error !== null) failures.push(failure(item.page.id, item.page.title, error));
+      if (error !== null) outcome.failures.push(failure(item.page.id, item.page.title, error));
 
       done += 1;
       progress.onPage?.(done, items.length);
     }
   }
 
-  return { states: outcome.states, degraded: outcome.degraded, failures };
+  return outcome;
 }
 
 /** Where a single-page pull writes, as the index already records it. */
@@ -207,7 +267,7 @@ export async function pullSinglePage(
   const fetched = await deps.client.getPage(pageId);
   if (!fetched.ok) return fetched;
 
-  const outcome = { states: [] as PageState[], degraded: [] as LocalPage[] };
+  const outcome = emptyAccumulator();
   const error = await writePage(
     deps,
     {

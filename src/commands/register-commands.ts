@@ -5,6 +5,7 @@ import type { CredentialStore } from '../auth/credential-store';
 import { probeSpaceFidelity } from '../diagnostics/fidelity-probe';
 import type { SettingsStore } from '../settings/settings-store';
 import type { ConnectionProfile, Subscription } from '../settings/settings-types';
+import type { NoteService } from '../sync/note-service';
 import type { SyncController } from '../sync/sync-controller';
 import { FidelityReportModal } from '../ui/fidelity-report-modal';
 import { SpaceBrowserModal } from '../ui/space-browser-modal';
@@ -21,6 +22,8 @@ export interface CommandDeps {
   readonly store: SettingsStore;
   readonly credentials: CredentialStore;
   readonly controller: SyncController;
+  /** Note-scoped operations: re-pull this page, open it in Confluence (FR-3.8, FR-10.5). */
+  readonly notes: NoteService;
   readonly createClient: (connection: ConnectionProfile) => ConfluenceClient;
   readonly startSync: (subscription: Subscription) => void;
   readonly openSyncPanel: () => void;
@@ -97,7 +100,7 @@ async function pullActive(deps: CommandDeps): Promise<void> {
     return;
   }
 
-  const result = await deps.controller.pullPage(file.path);
+  const result = await deps.notes.pullPage(file.path);
   new Notice(
     result.ok ? `Pulled "${result.value.title}" from Confluence.` : result.error.userMessage,
     result.ok ? 4000 : 10_000,
@@ -106,7 +109,7 @@ async function pullActive(deps: CommandDeps): Promise<void> {
 
 function openInConfluence(deps: CommandDeps): void {
   const file = activeNote(deps);
-  const url = file === null ? null : deps.controller.pageUrlFor(file.path);
+  const url = file === null ? null : deps.notes.pageUrlFor(file.path);
 
   if (url === null) {
     new Notice('This note has no Confluence page recorded in its frontmatter.');

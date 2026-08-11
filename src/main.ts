@@ -14,6 +14,7 @@ import { SettingsStore } from './settings/settings-store';
 import { ConfluenceSettingTab } from './settings/settings-tab';
 import type { ConnectionProfile, Subscription } from './settings/settings-types';
 import { FragmentStore } from './sync/fragment-store';
+import { NoteService } from './sync/note-service';
 import { SuspensionRegistry } from './sync/suspension';
 import { SyncController } from './sync/sync-controller';
 import { SyncStateStore } from './sync/sync-state';
@@ -42,6 +43,7 @@ export default class ConfluenceConnectorPlugin extends Plugin {
   private readonly credentials: CredentialStore;
   private readonly suspensions = new SuspensionRegistry();
   private readonly controller: SyncController;
+  private readonly notes: NoteService;
   private statusBar: StatusBar | null = null;
 
   /** Shared so the concurrency cap applies across every connection at once. */
@@ -59,19 +61,27 @@ export default class ConfluenceConnectorPlugin extends Plugin {
     );
 
     const state = new ObsidianStateGateway(app, manifest);
-    this.controller = new SyncController({
+    // One set of gateways, shared: the controller and the note service must agree
+    // about the vault and the index, or a re-pull would see different state from
+    // the sync that wrote it.
+    const shared = {
       settings: this.settingsStore,
       vault: new ObsidianVaultGateway(app, () =>
         this.settingsStore.get().subscriptions.map((subscription) => subscription.mountPath),
       ),
       state: new SyncStateStore(state),
       fragments: new FragmentStore(state),
-      suspensions: this.suspensions,
       logger: this.logger.child('sync'),
-      newId,
-      createClient: (connection) => this.createClient(connection),
+      createClient: (connection: ConnectionProfile) => this.createClient(connection),
       now: () => new Date().toISOString(),
+    };
+
+    this.controller = new SyncController({
+      ...shared,
+      suspensions: this.suspensions,
+      newId,
     });
+    this.notes = new NoteService(shared);
   }
 
   override async onload(): Promise<void> {
@@ -99,6 +109,7 @@ export default class ConfluenceConnectorPlugin extends Plugin {
       store: this.settingsStore,
       credentials: this.credentials,
       controller: this.controller,
+      notes: this.notes,
       createClient: (connection) => this.createClient(connection),
       startSync: (subscription) => {
         this.startSync(subscription);
@@ -159,9 +170,9 @@ export default class ConfluenceConnectorPlugin extends Plugin {
           handler(element, context.sourcePath),
         );
       },
-      pageUrlFor: (sourcePath) => this.controller.pageUrlFor(sourcePath),
+      pageUrlFor: (sourcePath) => this.notes.pageUrlFor(sourcePath),
       labelsFor: async (sourcePath) => {
-        const fragments = await this.controller.fragmentsFor(sourcePath);
+        const fragments = await this.notes.fragmentsFor(sourcePath);
         return new Map(
           [...fragments.values()].map((fragment) => [
             fragment.id,

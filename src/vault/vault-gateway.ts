@@ -51,6 +51,15 @@ export interface VaultGateway {
   writeNote(write: NoteWrite): Promise<Result<string, AppError>>;
 
   /**
+   * Writes an attachment (spec FR-8.1).
+   *
+   * Bytes, never a string: a PNG that has been through a string is a corrupt
+   * PNG. Subject to the same containment check as every other write — an
+   * attachment lands under the mount or not at all.
+   */
+  writeBinary(path: string, bytes: ArrayBuffer): Promise<Result<void, AppError>>;
+
+  /**
    * Moves a note or folder. Always via `fileManager.renameFile`, which rewrites
    * wikilinks vault-wide — including the user's own links into Confluence
    * content (spec §6.3 rule 2, risk R3).

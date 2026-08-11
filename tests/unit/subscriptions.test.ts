@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { SettingsStore } from '../../src/settings/settings-store';
 import type { Subscription } from '../../src/settings/settings-types';
 import { FragmentStore } from '../../src/sync/fragment-store';
+import { NoteService } from '../../src/sync/note-service';
 import { SyncController } from '../../src/sync/sync-controller';
 import { SyncStateStore } from '../../src/sync/sync-state';
 import { SuspensionRegistry } from '../../src/sync/suspension';
@@ -154,6 +155,7 @@ describe('SyncController', () => {
   let settings: SettingsStore;
   let client: FakeConfluence;
   let controller: SyncController;
+  let notes: NoteService;
 
   beforeEach(async () => {
     const logger = new Logger('test', () => false);
@@ -168,17 +170,22 @@ describe('SyncController', () => {
       ],
     });
 
-    controller = new SyncController({
+    const shared = {
       settings,
       vault,
       state: new SyncStateStore(stateGateway),
       fragments: new FragmentStore(stateGateway),
-      suspensions: new SuspensionRegistry(),
       logger,
-      newId: () => 'sub-1',
       createClient: () => client,
       now: () => '2026-08-10T12:00:00Z',
+    };
+
+    controller = new SyncController({
+      ...shared,
+      suspensions: new SuspensionRegistry(),
+      newId: () => 'sub-1',
     });
+    notes = new NoteService(shared);
     await controller.load();
   });
 
@@ -249,14 +256,14 @@ describe('SyncController', () => {
     await controller.sync(created);
     client.fetched.length = 0;
 
-    const result = await controller.pullPage('ENG/A.md');
+    const result = await notes.pullPage('ENG/A.md');
 
     expect(result.ok && result.value.pageId).toBe('1');
     expect(client.fetched).toEqual(['1']);
   });
 
   it('refuses to pull a note outside every subscription', async () => {
-    const result = await controller.pullPage('Personal/notes.md');
+    const result = await notes.pullPage('Personal/notes.md');
     expect(!result.ok && result.error.code).toBe('OUT_OF_MOUNT');
   });
 
@@ -264,7 +271,7 @@ describe('SyncController', () => {
     await controller.create(DRAFT);
     vault.addForeignNote('ENG/mine.md', 'personal\n');
 
-    const result = await controller.pullPage('ENG/mine.md');
+    const result = await notes.pullPage('ENG/mine.md');
     expect(!result.ok && result.error.code).toBe('NOT_FOUND');
   });
 
@@ -273,8 +280,8 @@ describe('SyncController', () => {
     client.pages = [{ id: '1', title: 'A' }];
     await controller.sync(created);
 
-    expect(controller.pageUrlFor('ENG/A.md')).toContain('pageId=1');
-    expect(controller.pageUrlFor('Personal/x.md')).toBeNull();
+    expect(notes.pageUrlFor('ENG/A.md')).toContain('pageId=1');
+    expect(notes.pageUrlFor('Personal/x.md')).toBeNull();
   });
 
   it('tells subscribers when a sync starts and finishes', async () => {

@@ -5,6 +5,7 @@ import { SettingsStore } from '../../src/settings/settings-store';
 import type { Subscription } from '../../src/settings/settings-types';
 import { CredentialStore } from '../../src/auth/credential-store';
 import { FragmentStore } from '../../src/sync/fragment-store';
+import { NoteService } from '../../src/sync/note-service';
 import { SyncController } from '../../src/sync/sync-controller';
 import { SyncStateStore } from '../../src/sync/sync-state';
 import { SuspensionRegistry } from '../../src/sync/suspension';
@@ -65,24 +66,33 @@ async function setup(): Promise<void> {
     ],
   });
 
-  controller = new SyncController({
+  // Shared, as the plugin shares them: a re-pull must see the state the sync
+  // wrote rather than a second copy of it.
+  const shared = {
     settings,
     vault,
     state: new SyncStateStore(stateGateway),
     fragments: new FragmentStore(stateGateway),
-    suspensions: new SuspensionRegistry(),
     logger,
-    newId: () => 'sub',
     createClient: () => client,
     now: () => '2026-08-10T12:00:00Z',
+  };
+
+  controller = new SyncController({
+    ...shared,
+    suspensions: new SuspensionRegistry(),
+    newId: () => 'sub',
   });
   await controller.load();
+
+  const notes = new NoteService(shared);
 
   const deps: CommandDeps = {
     plugin: plugin as unknown as Plugin,
     store: settings,
     credentials: new CredentialStore(null, settings, logger),
     controller,
+    notes,
     createClient: (): ConfluenceClient => {
       throw new Error('no client should be created unless a command asks for one');
     },

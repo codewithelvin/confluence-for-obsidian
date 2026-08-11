@@ -9,7 +9,7 @@ import {
   serialiseStartTag,
 } from './storage-serialiser';
 import type { ConversionContext, PageTarget } from './types';
-import { formatWikilink, isLinkable } from './wikilink';
+import { formatEmbed, formatWikilink, isLinkable } from './wikilink';
 
 /**
  * Inline (phrasing) conversion, storage format to mdast (spec §6.4.2).
@@ -109,6 +109,40 @@ function wikilink(
   if (label !== null && !isLabelSafe(label)) return null;
 
   return { type: 'html', value: formatWikilink(path, label) };
+}
+
+/**
+ * An attached image as an Obsidian embed (spec FR-8.2), or a placeholder.
+ *
+ * Converted only when the whole construct can be reproduced from the embed
+ * alone: a bare `<ac:image>`, or one carrying nothing but `ac:width`, wrapping a
+ * `<ri:attachment>` that carries nothing but its file name. `ac:thumbnail`,
+ * alignment, borders and captions have no embed form, and guessing at one would
+ * make the page read-only for the sake of a picture that renders slightly wrong.
+ *
+ * An attachment that is not on disk stays a placeholder: a broken image is worse
+ * than an honest label saying what is preserved.
+ */
+function convertImage(element: Element, ctx: ConversionContext): PhrasingContent {
+  const resource = firstElement(element);
+  const filename = resource === null ? null : riAttr(resource, 'filename');
+  const width = element.getAttribute('ac:width');
+
+  const reproducible =
+    resource !== null &&
+    tagOf(resource) === 'ri:attachment' &&
+    resource.attributes.length === 1 &&
+    element.attributes.length === (width === null ? 0 : 1);
+
+  const path = filename === null ? null : (ctx.resolveAttachment?.(filename) ?? null);
+  if (reproducible && filename !== null && path !== null && isLinkable(path)) {
+    return { type: 'html', value: formatEmbed(path, width) };
+  }
+
+  return makeInlinePlaceholder(ctx.placeholders, element, {
+    type: 'image',
+    label: `image: ${filename ?? 'embedded'}`,
+  });
 }
 
 function convertAcLink(element: Element, ctx: ConversionContext): PhrasingContent {
@@ -331,11 +365,7 @@ export function convertPhrasingElement(
     case 'ac:link':
       return convertAcLink(element, ctx);
     case 'ac:image':
-      // Attachments are downloaded in M4; until then the source is preserved.
-      return makeInlinePlaceholder(ctx.placeholders, element, {
-        type: 'image',
-        label: `image: ${riAttr(firstElement(element) ?? element, 'filename') ?? 'embedded'}`,
-      });
+      return convertImage(element, ctx);
     case 'time':
       return makeInlinePlaceholder(ctx.placeholders, element, {
         type: 'date',

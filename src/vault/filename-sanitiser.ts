@@ -73,6 +73,24 @@ export function sanitiseSegment(title: string): string {
 }
 
 /**
+ * Makes an attachment's file name safe **without touching its extension**
+ * (spec FR-8.1).
+ *
+ * `sanitiseSegment` would append its reserved-name underscore after the
+ * extension — `con.png` becoming `con.png_` — and Obsidian identifies an image
+ * by its extension, so that one character is the difference between a picture
+ * and an unknown file.
+ */
+export function sanitiseFileName(filename: string): string {
+  const dot = filename.lastIndexOf('.');
+  if (dot <= 0) return sanitiseSegment(filename);
+
+  const stem = sanitiseSegment(filename.slice(0, dot));
+  const extension = sanitiseSegment(filename.slice(dot + 1));
+  return `${stem}.${extension}`;
+}
+
+/**
  * Resolves a collision between siblings.
  *
  * Confluence enforces unique titles within a space, so a collision can only come

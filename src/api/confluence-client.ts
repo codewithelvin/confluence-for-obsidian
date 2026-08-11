@@ -5,8 +5,10 @@ import {
   parsePage,
   parsePageRef,
   parsePaged,
+  parseAttachment,
   parseSpace,
   parseUser,
+  type ConfluenceAttachment,
   type ConfluencePage,
   type ConfluencePageRef,
   type ConfluenceSpace,
@@ -57,6 +59,8 @@ export interface ConfluenceGateway {
     rootPageId: string | null,
   ): Promise<Result<number | null, AppError>>;
   getPage(id: string): Promise<Result<ConfluencePage, AppError>>;
+  listAttachments(pageId: string): Promise<Result<ConfluenceAttachment[], AppError>>;
+  downloadAttachment(downloadPath: string): Promise<Result<ArrayBuffer, AppError>>;
 }
 
 /**
@@ -118,6 +122,33 @@ export class ConfluenceClient implements ConfluenceGateway {
       parseSpace,
     );
     return space.ok ? ok(space.value.homepageId) : space;
+  }
+
+  /**
+   * Every attachment on a page (spec FR-8.1).
+   *
+   * `version` decides whether the bytes need fetching again (FR-8.3) and
+   * `extensions` carries the file size the limit is judged against (FR-8.4), so
+   * both are expanded — the endpoint reports neither by default.
+   */
+  async listAttachments(pageId: string): Promise<Result<ConfluenceAttachment[], AppError>> {
+    return this.runner.collect(
+      ENDPOINTS.attachments(pageId),
+      { expand: 'version,extensions' },
+      parseAttachment,
+    );
+  }
+
+  /**
+   * An attachment's bytes.
+   *
+   * The path comes from the listing's own `_links.download`, which already
+   * carries the version query — assembling it here would be guessing at a form
+   * Confluence has already told us.
+   */
+  async downloadAttachment(downloadPath: string): Promise<Result<ArrayBuffer, AppError>> {
+    const response = await this.runner.send(downloadPath, {});
+    return response.ok ? ok(response.value.bytes) : response;
   }
 
   /** Lists spaces, following pagination to completion (spec FR-2.1). */

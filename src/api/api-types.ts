@@ -78,6 +78,22 @@ export interface ConfluencePage extends ConfluencePageRef {
   readonly storage: string;
 }
 
+/** An attachment on a page, as the `child/attachment` endpoint reports it. */
+export interface ConfluenceAttachment {
+  readonly id: string;
+  /** Title, which for an attachment is its file name — what `ri:filename` matches. */
+  readonly filename: string;
+  readonly version: number;
+  /** Bytes, or `null` when the instance did not report a size (FR-8.4 then cannot judge). */
+  readonly size: number | null;
+  /**
+   * Path the bytes come from, relative to the site root and already carrying the
+   * version query Confluence puts there. Taken from the response rather than
+   * assembled, because it is the one form guaranteed to be right.
+   */
+  readonly downloadPath: string;
+}
+
 export type Parser<T> = (raw: unknown) => Result<T, AppError>;
 
 function malformed(what: string): AppError {
@@ -162,6 +178,25 @@ export const parsePageRef: Parser<ConfluencePageRef> = (raw) => {
   if (id === null) return err(malformed('a page'));
 
   return ok(readRef(raw, id));
+};
+
+export const parseAttachment: Parser<ConfluenceAttachment> = (raw) => {
+  if (!isRecord(raw)) return err(malformed('an attachment'));
+
+  const id = asNonEmptyString(raw['id']);
+  const filename = asNonEmptyString(raw['title']);
+  const downloadPath = asNonEmptyString(readPath(raw, '_links', 'download'));
+  if (id === null || filename === null || downloadPath === null) {
+    return err(malformed('an attachment'));
+  }
+
+  return ok({
+    id,
+    filename,
+    version: asFiniteNumber(readPath(raw, 'version', 'number')) ?? 0,
+    size: asFiniteNumber(readPath(raw, 'extensions', 'fileSize')),
+    downloadPath,
+  });
 };
 
 /**

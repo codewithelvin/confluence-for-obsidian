@@ -125,6 +125,32 @@ export class ObsidianVaultGateway implements VaultGateway {
   }
 
   /**
+   * Writes an attachment (spec FR-8.1).
+   *
+   * `modifyBinary` on a file that exists rather than delete-and-create, so the
+   * file keeps its identity and every note embedding it keeps working while the
+   * write happens.
+   */
+  async writeBinary(path: string, bytes: ArrayBuffer): Promise<Result<void, AppError>> {
+    const normalised = normalizePath(path);
+    const guard = this.guard(normalised);
+    if (guard !== null) return err(guard);
+
+    try {
+      const existing = this.app.vault.getFileByPath(normalised);
+      if (existing === null) {
+        await this.ensureFolder(parentPath(normalised));
+        await this.app.vault.createBinary(normalised, bytes);
+      } else {
+        await this.app.vault.modifyBinary(existing, bytes);
+      }
+      return ok(undefined);
+    } catch (cause) {
+      return err(vaultWriteFailed(normalised, cause));
+    }
+  }
+
+  /**
    * Replaces the body while carrying the existing frontmatter block across
    * verbatim (FR-4.6).
    *

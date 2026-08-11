@@ -45,6 +45,7 @@ function tracked(id: string, path: string, extra: Partial<PageState> = {}): Page
     localPath: path,
     isFolderNote: false,
     alias: null,
+    attachments: {},
     localHash: 'hash',
     storageHash: 'storage',
     fidelity: 'certified',

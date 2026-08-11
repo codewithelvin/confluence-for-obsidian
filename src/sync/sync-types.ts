@@ -5,6 +5,7 @@
  */
 
 import type { AppError } from '../util/errors';
+import type { SkippedAttachment } from './attachment-executor';
 import type { LocalPage } from './pull-planner';
 import type { UnmappablePage } from '../vault/path-mapper';
 
@@ -39,6 +40,10 @@ export interface SyncReport {
   readonly orphans: readonly LocalPage[];
   readonly untracked: readonly string[];
   readonly truncated: readonly LocalPage[];
+  /** Attachments fetched this sync (spec FR-8.1). */
+  readonly attachmentsDownloaded: number;
+  /** Attachments deliberately not fetched, with the reason (FR-8.4). */
+  readonly skippedAttachments: readonly SkippedAttachment[];
   readonly unmappable: readonly UnmappablePage[];
   readonly failures: readonly SyncFailure[];
   readonly cancelled: boolean;

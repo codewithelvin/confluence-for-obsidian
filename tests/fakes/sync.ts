@@ -6,7 +6,11 @@
  */
 
 import type { ConfluenceGateway, ConnectionCheck } from '../../src/api/confluence-client';
-import type { ConfluencePage, ConfluencePageRef } from '../../src/api/api-types';
+import type {
+  ConfluenceAttachment,
+  ConfluencePage,
+  ConfluencePageRef,
+} from '../../src/api/api-types';
 import { AppError } from '../../src/util/errors';
 import { sha256 } from '../../src/util/hash';
 import { err, ok, type Result } from '../../src/util/result';
@@ -16,6 +20,8 @@ import type { NoteWrite, ScannedNote, VaultGateway } from '../../src/vault/vault
 
 export class FakeVaultGateway implements VaultGateway {
   readonly files = new Map<string, string>();
+  /** Attachments, kept apart from notes: `scan` must never see one as a page. */
+  readonly binaries = new Map<string, Uint8Array>();
   readonly folders = new Set<string>();
   readonly identities = new Map<string, ConfluenceIdentity>();
   readonly writes: string[] = [];
@@ -54,6 +60,16 @@ export class FakeVaultGateway implements VaultGateway {
     this.identities.set(write.path, write.identity);
     this.writes.push(write.path);
     return Promise.resolve(ok(content));
+  }
+
+  writeBinary(path: string, bytes: ArrayBuffer): Promise<Result<void, AppError>> {
+    if (this.failWrites.has(path)) {
+      return Promise.resolve(err(new AppError('VAULT_WRITE_FAILED', `Refusing to write ${path}`)));
+    }
+
+    this.binaries.set(path, new Uint8Array(bytes));
+    this.writes.push(path);
+    return Promise.resolve(ok(undefined));
   }
 
   move(from: string, to: string): Promise<Result<void, AppError>> {
@@ -160,6 +176,30 @@ export class FakeConfluence implements ConfluenceGateway {
   /** Page the space reports as its home page, which collapses into the mount (D13). */
   homepageId: string | null = null;
   homepageError: AppError | null = null;
+
+  /** Attachments per page id, for the M4 download path. */
+  readonly attachments = new Map<string, ConfluenceAttachment[]>();
+  readonly downloaded: string[] = [];
+  readonly failDownload = new Set<string>();
+
+  listAttachments(pageId: string): Promise<Result<ConfluenceAttachment[], AppError>> {
+    return Promise.resolve(ok(this.attachments.get(pageId) ?? []));
+  }
+
+  downloadAttachment(downloadPath: string): Promise<Result<ArrayBuffer, AppError>> {
+    if (this.failDownload.has(downloadPath)) {
+      return Promise.resolve(
+        err(new AppError('NETWORK_UNREACHABLE', `Cannot download ${downloadPath}`)),
+      );
+    }
+
+    this.downloaded.push(downloadPath);
+    // Bytes derived from the path, so a test can tell one attachment from another.
+    const bytes = new TextEncoder().encode(downloadPath);
+    const buffer = new ArrayBuffer(bytes.length);
+    new Uint8Array(buffer).set(bytes);
+    return Promise.resolve(ok(buffer));
+  }
 
   spaceHomepageId(): Promise<Result<string | null, AppError>> {
     if (this.homepageError !== null) return Promise.resolve(err(this.homepageError));

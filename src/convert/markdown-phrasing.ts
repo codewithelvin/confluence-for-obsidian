@@ -2,7 +2,7 @@ import type { Link, PhrasingContent } from 'mdast';
 import { CODE_SEPARATOR, readInlinePlaceholderId } from './placeholder-registry';
 import { escapeAttribute, escapeText } from './storage-serialiser';
 import type { ReverseContext } from './types';
-import { formatWikilink, splitWikilinks, type Wikilink } from './wikilink';
+import { formatEmbed, formatWikilink, splitWikilinks, type Wikilink } from './wikilink';
 
 /**
  * Inline conversion, mdast to storage format.
@@ -137,11 +137,34 @@ function wikilinkToStorage(link: Wikilink, ctx: ReverseContext): string {
 }
 
 /**
- * Text, with any wikilinks in it converted.
+ * Turns an embed back into the `ac:image` it came from (spec FR-8.2).
  *
- * Wikilinks arrive as text because Markdown has no such syntax — `[[x]]` is a
- * link reference with no definition, which CommonMark leaves literal. Text with
- * none in it, which is nearly all of it, takes the fast path.
+ * A path that is not a known attachment stays literal text — the user may have
+ * embedded a file of their own, and uploading it is FR-8.6, not this. The label
+ * is a pixel width or nothing: any other label is not a form this converter
+ * produced, so it is left alone rather than guessed at.
+ */
+function embedToStorage(link: Wikilink, ctx: ReverseContext): string {
+  const filename = ctx.attachmentFor?.(link.path) ?? null;
+  const width = link.label;
+  const literal = escapeText(formatEmbed(link.path, width));
+
+  if (filename === null) return literal;
+  if (width !== null && !/^\d+$/.test(width)) return literal;
+
+  const attributes = width === null ? '' : ` ac:width="${escapeAttribute(width)}"`;
+  return (
+    `<ac:image${attributes}>` +
+    `<ri:attachment ri:filename="${escapeAttribute(filename)}"/></ac:image>`
+  );
+}
+
+/**
+ * Text, with any wikilink or embed in it converted.
+ *
+ * Both arrive as text because Markdown has no such syntax — `[[x]]` is a link
+ * reference with no definition, which CommonMark leaves literal. Text with
+ * neither in it, which is nearly all of it, takes the fast path.
  */
 function textToStorage(value: string, ctx: ReverseContext): string {
   const segments = splitWikilinks(value);
@@ -149,9 +172,11 @@ function textToStorage(value: string, ctx: ReverseContext): string {
   if (segments.length === 1 && first?.kind === 'text') return escapeText(value);
 
   return segments
-    .map((segment) =>
-      segment.kind === 'text' ? escapeText(segment.value) : wikilinkToStorage(segment.link, ctx),
-    )
+    .map((segment) => {
+      if (segment.kind === 'text') return escapeText(segment.value);
+      if (segment.kind === 'embed') return embedToStorage(segment.link, ctx);
+      return wikilinkToStorage(segment.link, ctx);
+    })
     .join('');
 }
 
@@ -207,8 +232,10 @@ export function phrasingToStorage(nodes: readonly PhrasingContent[], ctx: Revers
         output += node.value;
         break;
       case 'image':
-        // Uploading a new embed needs the attachment pipeline (M4). Reported
-        // rather than silently dropped.
+        // Markdown's own `![](url)` syntax, not an Obsidian embed: a wikilink
+        // embed arrives as text and is handled in `textToStorage`. This form
+        // points at a URL rather than at an attachment, so writing it back would
+        // need an upload (FR-8.6). Reported rather than silently dropped.
         ctx.unsupported.add('an embedded image');
         break;
       case 'imageReference':

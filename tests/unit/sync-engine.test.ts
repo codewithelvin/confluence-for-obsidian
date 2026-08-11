@@ -12,6 +12,9 @@ import { FakeConfluence, FakeStateGateway, FakeVaultGateway } from '../fakes/syn
 
 const NOW = '2026-08-10T12:00:00Z';
 
+/** Attachment limits the engine needs; generous, so no test trips FR-8.4 by accident. */
+const LIMITS = { attachmentLimitBytes: 25 * 1_048_576, attachmentsReferencedOnly: true };
+
 const SUBSCRIPTION: Subscription = {
   id: 'sub',
   connectionId: 'conn',
@@ -48,7 +51,13 @@ beforeEach(async () => {
 
 async function sync(callbacks: SyncCallbacks = {}): Promise<SyncReport> {
   const result = await engine.sync(
-    { subscription: SUBSCRIPTION, client, baseUrl: 'https://wiki.corp', strictMarkup: false },
+    {
+      subscription: SUBSCRIPTION,
+      client,
+      baseUrl: 'https://wiki.corp',
+      strictMarkup: false,
+      ...LIMITS,
+    },
     callbacks,
   );
   if (!result.ok) throw new Error(`sync failed: ${result.error.userMessage}`);
@@ -92,10 +101,116 @@ describe('the space home page collapses into the mount (decision D13)', () => {
       client,
       baseUrl: 'https://wiki.corp',
       strictMarkup: false,
+      ...LIMITS,
     });
 
     expect(result.ok).toBe(false);
     expect(vault.files.size).toBe(0);
+  });
+});
+
+describe('attachments (FR-8.1 to FR-8.5)', () => {
+  const IMAGE = '<p><ac:image><ri:attachment ri:filename="a.png"/></ac:image></p>';
+
+  function withImage(size: number | null = 1024): void {
+    client.pages = [{ id: '1', title: 'A', storage: IMAGE }];
+    client.attachments.set('1', [
+      { id: 'att1', filename: 'a.png', version: 3, size, downloadPath: '/download/a.png' },
+    ]);
+  }
+
+  it('downloads the attachment and embeds it in the note', async () => {
+    withImage();
+
+    const report = await sync();
+
+    expect(report.attachmentsDownloaded).toBe(1);
+    expect(vault.binaries.has('ENG/_attachments/1/a.png')).toBe(true);
+    expect(vault.files.get('ENG/A.md')).toContain('![[ENG/_attachments/1/a.png]]');
+  });
+
+  it('records the version so the next sync does not fetch it again (FR-8.3)', async () => {
+    withImage();
+    await sync();
+    expect(client.downloaded).toEqual(['/download/a.png']);
+
+    // Second sync, page unchanged: the attachment is already current.
+    await sync();
+    expect(client.downloaded).toEqual(['/download/a.png']);
+  });
+
+  it('fetches again when the attachment version moved', async () => {
+    withImage();
+    await sync();
+
+    client.attachments.set('1', [
+      {
+        id: 'att1',
+        filename: 'a.png',
+        version: 4,
+        size: 1024,
+        downloadPath: '/download/a.png?v=4',
+      },
+    ]);
+    client.pages = [{ id: '1', title: 'A', version: 2, storage: IMAGE }];
+    await sync();
+
+    expect(client.downloaded).toEqual(['/download/a.png', '/download/a.png?v=4']);
+  });
+
+  it('fetches again when the file is gone from the vault, whatever the index says', async () => {
+    withImage();
+    await sync();
+    vault.binaries.delete('ENG/_attachments/1/a.png');
+
+    client.pages = [{ id: '1', title: 'A', version: 2, storage: IMAGE }];
+    await sync();
+
+    expect(client.downloaded).toHaveLength(2);
+  });
+
+  it('skips an attachment over the size limit, and says why (FR-8.4)', async () => {
+    withImage(30 * 1_048_576);
+
+    const report = await sync();
+
+    expect(client.downloaded).toEqual([]);
+    expect(report.skippedAttachments[0]?.filename).toBe('a.png');
+    expect(report.skippedAttachments[0]?.reason).toContain('limit');
+    // Still readable as a placeholder rather than a broken embed.
+    expect(vault.files.get('ENG/A.md')).toContain('{cf:');
+  });
+
+  it('downloads an attachment of unreported size rather than assuming the worst', async () => {
+    // Refusing on a missing size would hide attachments for a whole instance.
+    withImage(null);
+
+    await sync();
+
+    expect(client.downloaded).toEqual(['/download/a.png']);
+  });
+
+  it('ignores an attachment the body does not refer to (FR-8.5)', async () => {
+    client.pages = [{ id: '1', title: 'A', storage: '<p>No images here.</p>' }];
+    client.attachments.set('1', [
+      { id: 'att1', filename: 'a.png', version: 1, size: 10, downloadPath: '/download/a.png' },
+    ]);
+
+    const report = await sync();
+
+    expect(client.downloaded).toEqual([]);
+    expect(report.attachmentsDownloaded).toBe(0);
+  });
+
+  it('writes the page even when the download fails (FR-3.9)', async () => {
+    withImage();
+    client.failDownload.add('/download/a.png');
+
+    const report = await sync();
+
+    expect(report.failures).toHaveLength(1);
+    expect(vault.files.has('ENG/A.md')).toBe(true);
+    expect(vault.files.get('ENG/A.md')).toContain('{cf:');
   });
 });
 
@@ -379,6 +494,7 @@ describe('preflight', () => {
       client,
       baseUrl: 'https://wiki.corp',
       strictMarkup: false,
+      ...LIMITS,
     });
 
     expect(!failed.ok && failed.error.code).toBe('AUTH_FAILED');
@@ -393,6 +509,7 @@ describe('preflight', () => {
       client,
       baseUrl: 'https://wiki.corp',
       strictMarkup: false,
+      ...LIMITS,
     });
 
     expect(!failed.ok && failed.error.code).toBe('AUTH_FAILED');
@@ -407,6 +524,7 @@ describe('preflight', () => {
       client,
       baseUrl: 'https://wiki.corp',
       strictMarkup: false,
+      ...LIMITS,
     });
 
     expect(!failed.ok && failed.error.code).toBe('VERSION_UNSUPPORTED');
@@ -421,6 +539,7 @@ describe('preflight', () => {
       client,
       baseUrl: 'https://wiki.corp',
       strictMarkup: false,
+      ...LIMITS,
     });
 
     expect(failed.ok).toBe(false);
@@ -437,6 +556,7 @@ describe('preflight', () => {
       client,
       baseUrl: 'https://wiki.corp',
       strictMarkup: false,
+      ...LIMITS,
     });
 
     expect(!failed.ok && failed.error.code).toBe('OUT_OF_MOUNT');

@@ -14,6 +14,7 @@ const PAGE: PageState = {
   localPath: 'Confluence/ENG/A.md',
   isFolderNote: false,
   alias: null,
+  attachments: {},
   localHash: 'local',
   storageHash: 'storage',
   fidelity: 'certified',

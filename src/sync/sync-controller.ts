@@ -1,16 +1,14 @@
 import type { ConfluenceGateway } from '../api/confluence-client';
-import type { FragmentMap } from '../convert/types';
 import type { SettingsStore } from '../settings/settings-store';
 import type { ConnectionProfile, Subscription } from '../settings/settings-types';
 import { AppError } from '../util/errors';
 import type { Logger } from '../util/logger';
 import { err, ok, type Result } from '../util/result';
-import { parentPath, type VaultGateway } from '../vault/vault-gateway';
+import type { VaultGateway } from '../vault/vault-gateway';
 import type { FragmentStore } from './fragment-store';
-import { LinkIndex, linkPath, type MirroredPage } from './link-index';
-import { pullSinglePage } from './pull-executor';
+import { linkPath, type MirroredPage } from './link-index';
 import { SyncEngine, type SyncEngineDeps } from './sync-engine';
-import type { PageState, SyncStateStore } from './sync-state';
+import type { SyncStateStore } from './sync-state';
 import type { SyncCallbacks, SyncProgress, SyncReport } from './sync-types';
 import { checkSubscriptionTarget, type SubscriptionCheck } from './subscription-service';
 import type { SubscriptionDraft } from './subscription-validator';
@@ -40,18 +38,6 @@ export interface SyncStatus {
   readonly running: Subscription | null;
   readonly progress: SyncProgress | null;
   readonly reports: ReadonlyMap<string, SyncReport>;
-}
-
-/**
- * Whether a path is the `Title/Title.md` form (decision D9).
- *
- * Only used when the index has no record of the note — otherwise the recorded
- * flag wins, because it is what stops an automatic demotion.
- */
-function isFolderNotePath(path: string): boolean {
-  const folder = parentPath(path);
-  const name = path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/, '');
-  return folder.slice(folder.lastIndexOf('/') + 1) === name;
 }
 
 export class SyncController {
@@ -216,6 +202,7 @@ export class SyncController {
         baseUrl: connection.baseUrl,
         strictMarkup: connection.strictMarkup,
         mirrored: this.mirroredElsewhere(subscription.id),
+        ...this.attachmentSettings(),
       },
       {
         ...callbacks,
@@ -264,110 +251,16 @@ export class SyncController {
     return pages;
   }
 
-  /**
-   * The preserved fragments behind a note's placeholders, for the renderer
-   * (spec FR-4.5).
-   *
-   * Empty for a note with no Confluence identity or no cached fragments — a
-   * placeholder with nothing behind it still renders, it just cannot say what it
-   * stands for.
-   */
-  async fragmentsFor(notePath: string): Promise<FragmentMap> {
-    const identity = this.deps.vault.readIdentity(notePath);
-    if (identity === null) return new Map();
-
-    const loaded = await this.deps.fragments.load(identity.id);
-    if (!loaded.ok || loaded.value === null) return new Map();
-    return loaded.value.fragments;
-  }
-
-  /** The Confluence URL recorded in a note's frontmatter (spec FR-10.5). */
-  pageUrlFor(notePath: string): string | null {
-    const identity = this.deps.vault.readIdentity(notePath);
-    if (identity === null) return null;
-    return identity.url.length === 0 ? null : identity.url;
-  }
-
-  /** The subscription whose mount contains a note, or `null` for a personal note. */
-  subscriptionFor(notePath: string): Subscription | null {
-    return (
-      this.deps.settings
-        .get()
-        .subscriptions.find(
-          (subscription) =>
-            notePath === subscription.mountPath ||
-            notePath.startsWith(`${subscription.mountPath}/`),
-        ) ?? null
-    );
-  }
-
-  /**
-   * Re-pulls the page behind one note (spec FR-3.8).
-   *
-   * Deliberately not routed through the full sync: the point of the command is
-   * to refresh *this* page without waiting for an enumeration of the space.
-   */
-  async pullPage(notePath: string): Promise<Result<PageState, AppError>> {
-    const subscription = this.subscriptionFor(notePath);
-    if (subscription === null) {
-      return err(
-        new AppError('OUT_OF_MOUNT', 'This note is not inside a Confluence subscription.'),
-      );
-    }
-
-    const identity = this.deps.vault.readIdentity(notePath);
-    if (identity === null) {
-      return err(
-        new AppError('NOT_FOUND', 'This note has no Confluence page recorded in its frontmatter.'),
-      );
-    }
-
-    const connection = this.connectionFor(subscription);
-    if (connection === null) {
-      return err(
-        new AppError('CREDENTIALS_UNAVAILABLE', 'That connection no longer exists.', {
-          action: 'open-settings',
-        }),
-      );
-    }
-
-    const previous = this.deps.state.forSubscription(subscription.id).pages[identity.id];
-    // Every subscription this time, its own included: a single-page pull does not
-    // recompute any paths, so the index is exactly right about all of them.
-    const linkIndex = new LinkIndex(this.mirroredElsewhere(null));
-
-    const pulled = await pullSinglePage(
-      {
-        client: this.deps.createClient(connection),
-        vault: this.deps.vault,
-        fragments: this.deps.fragments,
-        logger: this.deps.logger,
-        baseUrl: connection.baseUrl,
-        strictMarkup: connection.strictMarkup,
-        resolveTarget: linkIndex.resolveTarget,
-        resolveVaultPath: linkIndex.resolveVaultPath,
-        now: this.deps.now,
-      },
-      identity.id,
-      {
-        path: notePath,
-        isFolderNote: previous?.isFolderNote ?? isFolderNotePath(notePath),
-        alias: previous?.alias ?? null,
-      },
-    );
-    if (!pulled.ok) return pulled;
-
-    await this.recordPage(subscription.id, pulled.value);
-    return pulled;
-  }
-
-  private async recordPage(subscriptionId: string, page: PageState): Promise<void> {
-    const current = this.deps.state.forSubscription(subscriptionId);
-    await this.deps.state.replace(subscriptionId, {
-      ...current,
-      pages: { ...current.pages, [page.pageId]: page },
-    });
-    this.emit();
+  /** The attachment limits, in the units the engine works in (FR-8.4, FR-8.5). */
+  private attachmentSettings(): {
+    attachmentLimitBytes: number;
+    attachmentsReferencedOnly: boolean;
+  } {
+    const settings = this.deps.settings.get();
+    return {
+      attachmentLimitBytes: settings.attachmentSizeLimitMb * 1_048_576,
+      attachmentsReferencedOnly: settings.attachmentsReferencedOnly,
+    };
   }
 
   private emit(): void {

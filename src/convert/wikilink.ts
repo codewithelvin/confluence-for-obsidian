@@ -31,16 +31,33 @@ export function formatWikilink(path: string, label: string | null): string {
   return label === null ? `[[${path}]]` : `[[${path}|${label}]]`;
 }
 
+/**
+ * Builds `![[path]]`, or `![[path|width]]` for an image Confluence gave a width.
+ *
+ * Obsidian reads the label of an embed as a pixel width, which is the one piece
+ * of `ac:image` sizing that survives the trip in both directions.
+ */
+export function formatEmbed(path: string, width: string | null): string {
+  return width === null ? `![[${path}]]` : `![[${path}|${width}]]`;
+}
+
 export interface Wikilink {
   readonly path: string;
   /** Visible text, or `null` when the link shows the page's own name. */
   readonly label: string | null;
 }
 
-/** A run of plain text, or a wikilink, in document order. */
+/**
+ * A run of plain text, a wikilink, or an embed, in document order.
+ *
+ * Both bracket forms are recognised in one pass, because `![[x]]` contains
+ * `[[x]]`: a scanner that knew only about links would match the inside of an
+ * embed, turn an attached image into a page link, and leave a stray `!`.
+ */
 export type WikilinkSegment =
   | { readonly kind: 'text'; readonly value: string }
-  | { readonly kind: 'link'; readonly link: Wikilink };
+  | { readonly kind: 'link'; readonly link: Wikilink }
+  | { readonly kind: 'embed'; readonly link: Wikilink };
 
 /**
  * Matches a wikilink, non-greedily so that two on one line stay separate.
@@ -65,13 +82,11 @@ export function splitWikilinks(text: string): readonly WikilinkSegment[] {
     const path = match[2];
     if (start === undefined || path === undefined) continue;
 
-    // `![[…]]` is an *embed*, not a link — an attached image (M4), and an
-    // altogether different construct on the way back. Matching the `[[…]]`
-    // inside one would turn an image into a page link and leave a stray `!`.
-    if (match[1] === '!') continue;
-
     if (start > index) segments.push({ kind: 'text', value: text.slice(index, start) });
-    segments.push({ kind: 'link', link: { path, label: match[4] ?? null } });
+    segments.push({
+      kind: match[1] === '!' ? 'embed' : 'link',
+      link: { path, label: match[4] ?? null },
+    });
     index = start + match[0].length;
   }
 
