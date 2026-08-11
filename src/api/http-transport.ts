@@ -24,6 +24,15 @@ export interface HttpResponse {
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
   readonly text: string;
+  /**
+   * The response body as bytes, for an attachment download (spec FR-8.1).
+   *
+   * Always populated by the real transport — `requestUrl` decodes both forms from
+   * the same response — but read only by the download path, which must never
+   * route a binary through `text`: a PNG coerced to a string and back is a
+   * corrupt PNG.
+   */
+  readonly bytes: ArrayBuffer;
 }
 
 export interface HttpTransport {
@@ -59,6 +68,7 @@ export class ObsidianTransport implements HttpTransport {
         status: response.status,
         headers: response.headers,
         text: response.text,
+        bytes: response.arrayBuffer,
       });
     } catch (cause) {
       // Reaching here means the request never completed: DNS failure, refused

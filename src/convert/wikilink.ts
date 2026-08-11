@@ -48,7 +48,7 @@ export type WikilinkSegment =
  * Deliberately not anchored: a wikilink usually sits inside a sentence, and the
  * text around it has to survive.
  */
-const PATTERN = /\[\[([^[\]|#^]+)(\|([^[\]]*))?\]\]/g;
+const PATTERN = /(!?)\[\[([^[\]|#^]+)(\|([^[\]]*))?\]\]/g;
 
 /**
  * Splits text into plain runs and wikilinks.
@@ -62,11 +62,16 @@ export function splitWikilinks(text: string): readonly WikilinkSegment[] {
 
   for (const match of text.matchAll(PATTERN)) {
     const start = match.index;
-    const path = match[1];
+    const path = match[2];
     if (start === undefined || path === undefined) continue;
 
+    // `![[…]]` is an *embed*, not a link — an attached image (M4), and an
+    // altogether different construct on the way back. Matching the `[[…]]`
+    // inside one would turn an image into a page link and leave a stray `!`.
+    if (match[1] === '!') continue;
+
     if (start > index) segments.push({ kind: 'text', value: text.slice(index, start) });
-    segments.push({ kind: 'link', link: { path, label: match[3] ?? null } });
+    segments.push({ kind: 'link', link: { path, label: match[4] ?? null } });
     index = start + match[0].length;
   }
 

@@ -10,7 +10,15 @@ export function textResponse(
   status = 200,
   headers: Record<string, string> = {},
 ): HttpResponse {
-  return { status, headers, text };
+  return { status, headers, text, bytes: new TextEncoder().encode(text).buffer };
+}
+
+/** A binary response, for the attachment download path (spec FR-8.1). */
+export function bytesResponse(bytes: readonly number[], status = 200): HttpResponse {
+  const buffer = new ArrayBuffer(bytes.length);
+  new Uint8Array(buffer).set(bytes);
+
+  return { status, headers: {}, text: '', bytes: buffer };
 }
 
 export function jsonResponse(body: unknown, status = 200): HttpResponse {
