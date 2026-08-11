@@ -20,7 +20,7 @@ import { StatusBar, statusText } from '../../src/ui/status-bar';
 import { renderList, SYNC_PANEL_VIEW_TYPE, SyncPanelView } from '../../src/ui/sync-panel-view';
 import { RemoveSubscriptionModal } from '../../src/ui/remove-subscription-modal';
 import { SubscriptionModal } from '../../src/ui/subscription-modal';
-import { FakeConfluence, FakeStateGateway, FakeVaultGateway } from '../fakes/sync';
+import { FakeConfluence, FakeStateGateway, FakeVaultGateway, fakeBackups } from '../fakes/sync';
 import {
   App as FakeApp,
   Plugin as FakePlugin,
@@ -72,6 +72,7 @@ beforeEach(async () => {
     vault: new FakeVaultGateway(),
     state: new SyncStateStore(stateGateway),
     fragments: new FragmentStore(stateGateway),
+    backups: fakeBackups(stateGateway),
     suspensions,
     logger,
     newId: () => 'sub-2',

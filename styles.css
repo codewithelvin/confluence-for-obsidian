@@ -165,3 +165,58 @@
 .confluence-toc-level-6 {
   padding-left: var(--size-4-18);
 }
+
+/*
+ * The push and conflict dialogs (FR-5.2, FR-6.3).
+ *
+ * Every colour is an Obsidian variable (§7.4, FR-10.7): a diff whose added lines
+ * are hardcoded green is unreadable in half the community's themes.
+ */
+.confluence-diff {
+  max-height: 40vh;
+  overflow: auto;
+  margin: var(--size-4-2) 0;
+  padding: var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  line-height: var(--line-height-tight);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.confluence-diff-legend {
+  display: flex;
+  gap: var(--size-4-4);
+  font-size: var(--font-smaller);
+}
+
+.confluence-diff-added {
+  color: var(--text-success);
+}
+
+.confluence-diff-removed {
+  color: var(--text-error);
+}
+
+.confluence-diff-same {
+  color: var(--text-muted);
+}
+
+.confluence-conflict-summary {
+  margin-bottom: var(--size-4-1);
+}
+
+.confluence-conflict-path {
+  margin-top: 0;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+}
+
+.confluence-conflict-modal,
+.confluence-verification-modal {
+  max-width: 46rem;
+}

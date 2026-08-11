@@ -203,11 +203,17 @@ export function buildPullPlan(input: PlanInput): PullPlan {
   const buckets = emptyBuckets();
   const remote = new Map(input.remote.map((page) => [page.id, page]));
 
+  // A "Save Both" snapshot is not a page (FR-6.4). Dropped before anything else
+  // looks at the scan, so it can be neither matched to an identity nor reported
+  // as an untracked candidate.
+  const local = input.local.filter((note) => !note.isConflictCopy);
+  const scoped: PlanInput = { ...input, local };
+
   // Located by identity rather than by path: a note the user moved is still the
   // same page, and matching on path alone would report it as both an orphan and
   // an untracked file.
   const scanned = new Map(
-    input.local.flatMap((note) => (note.identity === null ? [] : [[note.identity.id, note]])),
+    local.flatMap((note) => (note.identity === null ? [] : [[note.identity.id, note]])),
   );
 
   let unchanged = 0;
@@ -250,7 +256,7 @@ export function buildPullPlan(input: PlanInput): PullPlan {
     ...buckets,
     relocate,
     forget,
-    untracked: untrackedNotes(input, remote),
+    untracked: untrackedNotes(scoped, remote),
     unmappable: input.paths.unmappable,
     unchanged,
   };

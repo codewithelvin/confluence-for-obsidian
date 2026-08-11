@@ -11,7 +11,7 @@
 
 import { AppError } from '../util/errors';
 import type { Result } from '../util/result';
-import type { ConfluenceIdentity } from './frontmatter';
+import type { ConflictCopy, ConfluenceIdentity } from './frontmatter';
 
 /** A note as the sync engine wants it written: body plus plugin-owned identity. */
 export interface NoteWrite {
@@ -32,6 +32,13 @@ export interface ScannedNote {
   readonly hash: string;
   /** `null` for a file the plugin does not own — an untracked candidate. */
   readonly identity: ConfluenceIdentity | null;
+  /**
+   * A "Save Both" snapshot, which sync must leave alone entirely (FR-6.4).
+   *
+   * Neither tracked nor untracked: reporting it as an untracked candidate would
+   * invite the user to promote a read-only copy of a page into a second page.
+   */
+  readonly isConflictCopy: boolean;
 }
 
 export interface VaultGateway {
@@ -44,11 +51,44 @@ export interface VaultGateway {
   scan(folder: string): Promise<Result<readonly ScannedNote[], AppError>>;
 
   /**
+   * A note's full content, frontmatter included.
+   *
+   * The push path needs the bytes themselves, not the hash a scan reports: the
+   * body it converts and verifies is exactly what the user has on disk.
+   */
+  read(path: string): Promise<Result<string, AppError>>;
+
+  /**
    * Creates or replaces a note, preserving any frontmatter keys the user added
    * (FR-4.6), and returns the finished file content so the caller can hash what
    * was actually written rather than what it intended to write.
    */
   writeNote(write: NoteWrite): Promise<Result<string, AppError>>;
+
+  /**
+   * Rewrites only the plugin-owned frontmatter and returns the finished content
+   * (spec §6.5.1).
+   *
+   * This is the push path's counterpart to `writeNote`: after a successful push
+   * the *body* is the user's and must not be touched, but the recorded version
+   * has moved on. Writing the whole note instead would replace what the user
+   * wrote with the converter's idea of it.
+   */
+  updateIdentity(path: string, identity: ConfluenceIdentity): Promise<Result<string, AppError>>;
+
+  /**
+   * Writes the read-only snapshot a "Save Both" resolution keeps (FR-6.4).
+   *
+   * Deliberately not `writeNote`: the snapshot must **not** carry the identity
+   * block, or it becomes indistinguishable from the note itself and the next push
+   * writes a copy of the remote page over the remote page. It carries the
+   * conflict-copy marker instead, which is what excludes it from sync.
+   */
+  writeConflictCopy(
+    path: string,
+    body: string,
+    copy: ConflictCopy,
+  ): Promise<Result<void, AppError>>;
 
   /**
    * Writes an attachment (spec FR-8.1).

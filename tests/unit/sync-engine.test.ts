@@ -8,7 +8,7 @@ import type { LocalPage } from '../../src/sync/pull-planner';
 import type { Subscription } from '../../src/settings/settings-types';
 import { AppError } from '../../src/util/errors';
 import { Logger } from '../../src/util/logger';
-import { FakeConfluence, FakeStateGateway, FakeVaultGateway } from '../fakes/sync';
+import { FakeConfluence, FakeStateGateway, FakeVaultGateway, fakeBackups } from '../fakes/sync';
 
 const NOW = '2026-08-10T12:00:00Z';
 
@@ -43,6 +43,7 @@ beforeEach(async () => {
     vault,
     state,
     fragments: new FragmentStore(stateGateway),
+    backups: fakeBackups(stateGateway),
     suspensions,
     logger: new Logger('test', () => false),
     now: () => NOW,

@@ -214,6 +214,39 @@ export const parsePage: Parser<ConfluencePage> = (raw) => {
   return ok({ ...readRef(raw, id), storage });
 };
 
+/** What a page update reports back: the version the edit now sits at (FR-5.4). */
+export interface ConfluencePageVersion {
+  readonly id: string;
+  readonly title: string;
+  readonly version: number;
+  readonly updatedAt: string;
+  readonly updatedBy: string;
+}
+
+/**
+ * Validates the response to a page update.
+ *
+ * `version.number` is required rather than defaulted: it is the whole point of
+ * the response, and recording a guessed version would make the *next* push send
+ * a stale one — a conflict the user never caused.
+ */
+export const parseUpdatedPage: Parser<ConfluencePageVersion> = (raw) => {
+  if (!isRecord(raw)) return err(malformed('an updated page'));
+
+  const id = asNonEmptyString(raw['id']);
+  const version = asFiniteNumber(readPath(raw, 'version', 'number'));
+  if (id === null || version === null) return err(malformed('an updated page'));
+
+  const ref = readRef(raw, id);
+  return ok({
+    id,
+    title: ref.title,
+    version,
+    updatedAt: ref.updatedAt,
+    updatedBy: ref.updatedBy,
+  });
+};
+
 /**
  * Validates a paged envelope. Individual malformed entries are dropped rather
  * than failing the whole page — one bad space must not make the space browser

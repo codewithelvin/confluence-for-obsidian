@@ -9,7 +9,7 @@ import { FragmentStore } from '../../src/sync/fragment-store';
 import { SyncController } from '../../src/sync/sync-controller';
 import { SyncStateStore } from '../../src/sync/sync-state';
 import { SuspensionRegistry } from '../../src/sync/suspension';
-import { FakeStateGateway, FakeVaultGateway } from '../fakes/sync';
+import { FakeStateGateway, FakeVaultGateway, fakeBackups } from '../fakes/sync';
 import { App as FakeApp, Plugin as FakePlugin, type PluginManifest } from '../fakes/obsidian';
 
 const manifest: PluginManifest = {
@@ -33,6 +33,7 @@ function setup(): { store: SettingsStore; tab: ConfluenceSettingTab } {
     vault: new FakeVaultGateway(),
     state: new SyncStateStore(stateGateway),
     fragments: new FragmentStore(stateGateway),
+    backups: fakeBackups(stateGateway),
     suspensions: new SuspensionRegistry(),
     logger,
     newId: () => 'test-subscription-id',

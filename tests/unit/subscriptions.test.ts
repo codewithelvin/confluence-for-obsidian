@@ -15,7 +15,7 @@ import {
 } from '../../src/sync/subscription-validator';
 import { AppError } from '../../src/util/errors';
 import { Logger } from '../../src/util/logger';
-import { FakeConfluence, FakeStateGateway, FakeVaultGateway } from '../fakes/sync';
+import { FakeConfluence, FakeStateGateway, FakeVaultGateway, fakeBackups } from '../fakes/sync';
 import { App as FakeApp, Plugin as FakePlugin, type PluginManifest } from '../fakes/obsidian';
 
 const DRAFT: SubscriptionDraft = {
@@ -175,6 +175,7 @@ describe('SyncController', () => {
       vault,
       state: new SyncStateStore(stateGateway),
       fragments: new FragmentStore(stateGateway),
+      backups: fakeBackups(stateGateway),
       logger,
       createClient: () => client,
       now: () => '2026-08-10T12:00:00Z',

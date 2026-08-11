@@ -17,6 +17,7 @@ interface ObsidianDomExtensions {
   addClass(...classes: string[]): void;
   createEl(tag: string, options?: { text?: string; cls?: string }): HTMLElement;
   createDiv(options?: { text?: string; cls?: string }): HTMLElement;
+  createSpan(options?: { text?: string; cls?: string }): HTMLElement;
 }
 
 /** Installs the DOM helpers Obsidian adds to HTMLElement.prototype. */
@@ -49,6 +50,12 @@ function augmentDom(): void {
     options?: { text?: string; cls?: string },
   ): HTMLElement {
     return (this as unknown as ObsidianDomExtensions).createEl('div', options);
+  };
+  proto['createSpan'] = function (
+    this: HTMLElement,
+    options?: { text?: string; cls?: string },
+  ): HTMLElement {
+    return (this as unknown as ObsidianDomExtensions).createEl('span', options);
   };
 }
 

@@ -8,6 +8,7 @@ import type { Logger } from '../util/logger';
 import { pageUrl, type ConfluenceIdentity } from '../vault/frontmatter';
 import { parentPath, type VaultGateway } from '../vault/vault-gateway';
 import type { AttachmentOutcome, SkippedAttachment } from './attachment-executor';
+import { conversionOptionsFor } from './conversion-options';
 import type { FragmentStore } from './fragment-store';
 import type { LocalPage, PullItem, RelocateItem } from './pull-planner';
 import type { AttachmentState, PageState } from './sync-state';
@@ -118,27 +119,16 @@ function identityFor(
  * Everything the converter needs for one page, including how to resolve the
  * attachments just downloaded for it (FR-8.2).
  *
- * Both attachment directions are built from the same record, which is what keeps
- * them agreeing: a path the forward pass writes is a path the reverse pass reads.
+ * Assembled by `conversionOptionsFor`, which the push path uses too — the two
+ * must agree exactly, or a page the pull certified would fail verification on
+ * the way back out.
  */
 function conversionOptions(
   deps: ExecutorDeps,
   item: PullItem,
   attachments: Readonly<Record<string, AttachmentState>>,
 ): ConversionOptions {
-  const byPath = new Map<string, string>(
-    Object.entries(attachments).map(([filename, state]) => [state.localPath, filename]),
-  );
-
-  return {
-    baseUrl: deps.baseUrl,
-    spaceKey: item.page.spaceKey,
-    strictMarkup: deps.strictMarkup,
-    resolveTarget: deps.resolveTarget,
-    resolveVaultPath: deps.resolveVaultPath,
-    resolveAttachment: (filename) => attachments[filename]?.localPath ?? null,
-    attachmentFor: (path) => byPath.get(path) ?? null,
-  };
+  return conversionOptionsFor({ ...deps, spaceKey: item.page.spaceKey }, attachments);
 }
 
 /**

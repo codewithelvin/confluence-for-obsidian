@@ -33,7 +33,11 @@ function identity(id: string): ConfluenceIdentity {
 }
 
 function note(id: string, path: string, hash: string): ScannedNote {
-  return { path, hash, identity: identity(id) };
+  return { path, hash, identity: identity(id), isConflictCopy: false };
+}
+
+function foreign(path: string, extra: Partial<ScannedNote> = {}): ScannedNote {
+  return { path, hash: 'x', identity: null, isConflictCopy: false, ...extra };
 }
 
 function tracked(id: string, path: string, extra: Partial<PageState> = {}): PageState {
@@ -175,11 +179,39 @@ describe('untracked files', () => {
   it('reports Markdown in the mount that the plugin does not own', () => {
     const result = plan(
       [ref('1', 'A')],
-      [note('1', 'ENG/A.md', 'hash'), { path: 'ENG/My notes.md', hash: 'x', identity: null }],
+      [note('1', 'ENG/A.md', 'hash'), foreign('ENG/My notes.md')],
       stateOf(tracked('1', 'ENG/A.md')),
     );
 
     expect(result.untracked).toEqual(['ENG/My notes.md']);
+  });
+
+  it('leaves a "Save Both" snapshot out of the plan entirely (FR-6.4)', () => {
+    // Reporting it as untracked would invite the user to promote a read-only
+    // copy of a page into a second page.
+    const result = plan(
+      [ref('1', 'A')],
+      [note('1', 'ENG/A.md', 'hash'), foreign('ENG/A (remote v7).md', { isConflictCopy: true })],
+      stateOf(tracked('1', 'ENG/A.md')),
+    );
+
+    expect(result.untracked).toEqual([]);
+  });
+
+  it('does not mistake a snapshot for the note whose page it copies', () => {
+    // The snapshot has no identity of its own, but if the scan handed it through
+    // it would be matched by path and the real note reported as an orphan.
+    const result = plan(
+      [ref('1', 'A')],
+      [
+        note('1', 'ENG/A.md', 'hash'),
+        { ...note('1', 'ENG/A (remote v7).md', 'other'), isConflictCopy: true },
+      ],
+      stateOf(tracked('1', 'ENG/A.md')),
+    );
+
+    expect(result.orphans).toEqual([]);
+    expect(result.unchanged).toBe(1);
   });
 });
 

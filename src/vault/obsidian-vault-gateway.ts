@@ -6,11 +6,15 @@ import { sha256 } from '../util/hash';
 import { err, ok, type Result } from '../util/result';
 import {
   applyAlias,
+  CONFLICT_COPY_KEY,
   CONFLUENCE_KEY,
+  isConflictCopy,
   joinFrontmatter,
   readIdentity,
   splitFrontmatter,
+  toConflictCopyValue,
   toFrontmatterValue,
+  type ConflictCopy,
 } from './frontmatter';
 import {
   isInsideMount,
@@ -97,11 +101,30 @@ export class ObsidianVaultGateway implements VaultGateway {
       return err(vaultWriteFailed(file.path, cause));
     }
 
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
     return ok({
       path: file.path,
       hash: await sha256(content),
-      identity: readIdentity(this.app.metadataCache.getFileCache(file)?.frontmatter),
+      identity: readIdentity(frontmatter),
+      isConflictCopy: isConflictCopy(frontmatter),
     });
+  }
+
+  async read(path: string): Promise<Result<string, AppError>> {
+    const normalised = normalizePath(path);
+    const guard = this.guard(normalised);
+    if (guard !== null) return err(guard);
+
+    const file = this.app.vault.getFileByPath(normalised);
+    if (file === null) {
+      return err(new AppError('NOT_FOUND', `There is no note at "${normalised}".`));
+    }
+
+    try {
+      return ok(await this.app.vault.read(file));
+    } catch (cause) {
+      return err(vaultWriteFailed(normalised, cause));
+    }
   }
 
   async writeNote(write: NoteWrite): Promise<Result<string, AppError>> {
@@ -121,6 +144,59 @@ export class ObsidianVaultGateway implements VaultGateway {
       return ok(await this.app.vault.read(file));
     } catch (cause) {
       return err(vaultWriteFailed(path, cause));
+    }
+  }
+
+  async updateIdentity(
+    path: string,
+    identity: ConfluenceIdentity,
+  ): Promise<Result<string, AppError>> {
+    const normalised = normalizePath(path);
+    const guard = this.guard(normalised);
+    if (guard !== null) return err(guard);
+
+    const file = this.app.vault.getFileByPath(normalised);
+    if (file === null) {
+      return err(new AppError('NOT_FOUND', `There is no note at "${normalised}".`));
+    }
+
+    try {
+      await this.app.fileManager.processFrontMatter(
+        file,
+        (frontmatter: Record<string, unknown>) => {
+          frontmatter[CONFLUENCE_KEY] = toFrontmatterValue(identity);
+        },
+      );
+      return ok(await this.app.vault.read(file));
+    } catch (cause) {
+      return err(vaultWriteFailed(normalised, cause));
+    }
+  }
+
+  async writeConflictCopy(
+    path: string,
+    body: string,
+    copy: ConflictCopy,
+  ): Promise<Result<void, AppError>> {
+    const normalised = normalizePath(path);
+    const guard = this.guard(normalised);
+    if (guard !== null) return err(guard);
+
+    try {
+      const file = await this.writeBody(normalised, body);
+      // Through `processFrontMatter` like every other frontmatter write (§7.4),
+      // rather than hand-rolled YAML — a snapshot of a page in an unfamiliar
+      // language is exactly where hand-rolled quoting goes wrong.
+      await this.app.fileManager.processFrontMatter(
+        file,
+        (frontmatter: Record<string, unknown>) => {
+          delete frontmatter[CONFLUENCE_KEY];
+          frontmatter[CONFLICT_COPY_KEY] = toConflictCopyValue(copy);
+        },
+      );
+      return ok(undefined);
+    } catch (cause) {
+      return err(vaultWriteFailed(normalised, cause));
     }
   }
 

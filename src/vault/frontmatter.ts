@@ -22,6 +22,20 @@ export const CONFLUENCE_KEY = 'confluence';
  */
 export const ALIASES_KEY = 'aliases';
 
+/**
+ * Marks the read-only copy of a remote page written by a "Save Both" conflict
+ * resolution (spec FR-6.4).
+ *
+ * A second reserved key rather than a field inside `confluence`, because the two
+ * mean opposite things: `confluence` says "this note *is* that page", and this
+ * says "this note is a snapshot beside it". A copy carrying the first would be
+ * mistaken for the note itself and pushed over the page it was saved to protect.
+ *
+ * FR-6.4 asks for the copy to be excluded from sync; this key is how the mount
+ * scan recognises one, so it is reported as neither tracked nor untracked.
+ */
+export const CONFLICT_COPY_KEY = 'confluenceRemoteCopy';
+
 export type Fidelity = 'certified' | 'degraded';
 
 /** Portable page identity, per spec §6.5.1. */
@@ -100,6 +114,51 @@ export function readIdentity(frontmatter: unknown): ConfluenceIdentity | null {
     updatedBy: asNonEmptyString(raw['updatedBy']) ?? '',
     fidelity: raw['fidelity'] === 'degraded' ? 'degraded' : 'certified',
   };
+}
+
+/** The snapshot a "Save Both" resolution keeps beside the note (spec FR-6.4). */
+export interface ConflictCopy {
+  readonly pageId: string;
+  readonly space: string;
+  readonly version: number;
+  readonly updated: string;
+  readonly updatedBy: string;
+  readonly url: string;
+}
+
+export function toConflictCopyValue(copy: ConflictCopy): Record<string, unknown> {
+  return {
+    pageId: copy.pageId,
+    space: copy.space,
+    version: copy.version,
+    updated: copy.updated,
+    updatedBy: copy.updatedBy,
+    url: copy.url,
+    note: 'Read-only snapshot of the Confluence page. Not synced. Delete it once merged.',
+  };
+}
+
+/**
+ * Whether parsed frontmatter marks the file a conflict copy.
+ *
+ * Only the key's presence is checked. Anything under it is descriptive, and a
+ * copy whose fields were hand-edited must still be excluded from sync — the
+ * exclusion is the safety property, and the details are only there for the reader.
+ */
+export function isConflictCopy(frontmatter: unknown): boolean {
+  return isRecord(frontmatter) && frontmatter[CONFLICT_COPY_KEY] !== undefined;
+}
+
+/**
+ * File name for the copy (spec FR-6.4): `<Title> (remote v43).md`, beside the note.
+ *
+ * Built from the note's own path rather than the page title, so a title that was
+ * sanitised or truncated on the way in (§6.5.2, §6.5.3) produces a copy sitting
+ * next to the file it belongs to instead of one the user cannot associate with it.
+ */
+export function conflictCopyPath(notePath: string, remoteVersion: number): string {
+  const base = notePath.replace(/\.md$/i, '');
+  return `${base} (remote v${String(remoteVersion)}).md`;
 }
 
 /**

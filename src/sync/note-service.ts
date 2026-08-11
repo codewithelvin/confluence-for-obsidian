@@ -2,13 +2,16 @@ import type { ConfluenceGateway } from '../api/confluence-client';
 import type { FragmentMap } from '../convert/types';
 import type { SettingsStore } from '../settings/settings-store';
 import type { ConnectionProfile, Subscription } from '../settings/settings-types';
-import { AppError } from '../util/errors';
+import type { AppError } from '../util/errors';
+import { sha256 } from '../util/hash';
 import type { Logger } from '../util/logger';
 import { err, type Result } from '../util/result';
 import { parentPath, type VaultGateway } from '../vault/vault-gateway';
 import { attachmentHook } from './attachment-executor';
+import type { BackupStore } from './backup-store';
 import type { FragmentStore } from './fragment-store';
-import { LinkIndex, linkPath, type MirroredPage } from './link-index';
+import { LinkIndex, mirroredPages } from './link-index';
+import { locateNote, subscriptionFor } from './note-locator';
 import { pullSinglePage, type ExecutorDeps } from './pull-executor';
 import type { PageState, SyncStateStore } from './sync-state';
 
@@ -25,6 +28,7 @@ export interface NoteServiceDeps {
   readonly vault: VaultGateway;
   readonly fragments: FragmentStore;
   readonly state: SyncStateStore;
+  readonly backups: BackupStore;
   readonly logger: Logger;
   readonly createClient: (connection: ConnectionProfile) => ConfluenceGateway;
   readonly now: () => string;
@@ -47,15 +51,7 @@ export class NoteService {
 
   /** The subscription whose mount contains a note, or `null` for a personal note. */
   subscriptionFor(notePath: string): Subscription | null {
-    return (
-      this.deps.settings
-        .get()
-        .subscriptions.find(
-          (subscription) =>
-            notePath === subscription.mountPath ||
-            notePath.startsWith(`${subscription.mountPath}/`),
-        ) ?? null
-    );
+    return subscriptionFor(this.deps.settings.get().subscriptions, notePath);
   }
 
   /** The Confluence URL recorded in a note's frontmatter (spec FR-10.5). */
@@ -89,10 +85,14 @@ export class NoteService {
    * to refresh *this* page without waiting for an enumeration of the space.
    */
   async pullPage(notePath: string): Promise<Result<PageState, AppError>> {
-    const target = this.resolve(notePath);
+    const target = locateNote(this.deps, notePath);
     if (!target.ok) return target;
 
     const { subscription, connection, pageId, previous } = target.value;
+
+    const backed = await this.backUpIfModified(notePath, previous);
+    if (backed !== null) return err(backed);
+
     const pulled = await pullSinglePage(this.executorFor(subscription, connection), pageId, {
       path: notePath,
       isFolderNote: previous?.isFolderNote ?? isFolderNotePath(notePath),
@@ -104,51 +104,27 @@ export class NoteService {
     return pulled;
   }
 
-  /** Everything a single-page pull needs to know about where the note belongs. */
-  private resolve(notePath: string): Result<
-    {
-      subscription: Subscription;
-      connection: ConnectionProfile;
-      pageId: string;
-      previous: PageState | undefined;
-    },
-    AppError
-  > {
-    const subscription = this.subscriptionFor(notePath);
-    if (subscription === null) {
-      return err(
-        new AppError('OUT_OF_MOUNT', 'This note is not inside a Confluence subscription.'),
-      );
-    }
+  /**
+   * Copies the note aside when a re-pull is about to discard local edits (FR-6.6).
+   *
+   * A single-page pull is a destructive local write like any other, and it is the
+   * one the user reaches for *while editing*. An unmodified note is not backed up:
+   * every re-pull would otherwise leave a copy of a file identical to the one
+   * already on disk, and the retention window would fill with them.
+   */
+  private async backUpIfModified(
+    notePath: string,
+    previous: PageState | undefined,
+  ): Promise<AppError | null> {
+    const content = await this.deps.vault.read(notePath);
+    // No file yet, or unreadable: there is nothing to lose, and the pull itself
+    // will report a write failure if the path is genuinely unusable.
+    if (!content.ok) return null;
 
-    const identity = this.deps.vault.readIdentity(notePath);
-    if (identity === null) {
-      return err(
-        new AppError('NOT_FOUND', 'This note has no Confluence page recorded in its frontmatter.'),
-      );
-    }
+    if (previous !== undefined && (await sha256(content.value)) === previous.localHash) return null;
 
-    const connection =
-      this.deps.settings
-        .get()
-        .connections.find((candidate) => candidate.id === subscription.connectionId) ?? null;
-    if (connection === null) {
-      return err(
-        new AppError('CREDENTIALS_UNAVAILABLE', 'That connection no longer exists.', {
-          action: 'open-settings',
-        }),
-      );
-    }
-
-    return {
-      ok: true,
-      value: {
-        subscription,
-        connection,
-        pageId: identity.id,
-        previous: this.deps.state.forSubscription(subscription.id).pages[identity.id],
-      },
-    };
+    const saved = await this.deps.backups.save(notePath, content.value);
+    return saved.ok ? null : saved.error;
   }
 
   /**
@@ -159,7 +135,11 @@ export class NoteService {
    */
   private executorFor(subscription: Subscription, connection: ConnectionProfile): ExecutorDeps {
     const client = this.deps.createClient(connection);
-    const linkIndex = new LinkIndex(this.mirrored());
+    const linkIndex = new LinkIndex(
+      mirroredPages(this.deps.settings.get().subscriptions, (id) =>
+        this.deps.state.forSubscription(id),
+      ),
+    );
     const settings = this.deps.settings.get();
 
     return {
@@ -185,22 +165,6 @@ export class NoteService {
       ),
       now: this.deps.now,
     };
-  }
-
-  /** Every mirrored page, across every subscription (FR-4.7). */
-  private mirrored(): readonly MirroredPage[] {
-    const pages: MirroredPage[] = [];
-
-    for (const subscription of this.deps.settings.get().subscriptions) {
-      for (const page of Object.values(this.deps.state.forSubscription(subscription.id).pages)) {
-        pages.push({
-          spaceKey: subscription.spaceKey,
-          title: page.title,
-          path: linkPath(page.localPath),
-        });
-      }
-    }
-    return pages;
   }
 
   private async record(subscriptionId: string, page: PageState): Promise<void> {

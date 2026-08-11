@@ -6,7 +6,7 @@ import type { Logger } from '../util/logger';
 import { err, ok, type Result } from '../util/result';
 import type { VaultGateway } from '../vault/vault-gateway';
 import type { FragmentStore } from './fragment-store';
-import { linkPath, type MirroredPage } from './link-index';
+import { mirroredPages, type MirroredPage } from './link-index';
 import { SyncEngine, type SyncEngineDeps } from './sync-engine';
 import type { SyncStateStore } from './sync-state';
 import type { SyncCallbacks, SyncProgress, SyncReport } from './sync-types';
@@ -234,21 +234,12 @@ export class SyncController {
    * the engine derives from the placement it is about to make rather than from the
    * index it is about to replace.
    */
-  private mirroredElsewhere(subscriptionId: string | null): readonly MirroredPage[] {
-    const pages: MirroredPage[] = [];
-
-    for (const subscription of this.deps.settings.get().subscriptions) {
-      if (subscription.id === subscriptionId) continue;
-
-      for (const page of Object.values(this.deps.state.forSubscription(subscription.id).pages)) {
-        pages.push({
-          spaceKey: subscription.spaceKey,
-          title: page.title,
-          path: linkPath(page.localPath),
-        });
-      }
-    }
-    return pages;
+  private mirroredElsewhere(subscriptionId: string): readonly MirroredPage[] {
+    return mirroredPages(
+      this.deps.settings.get().subscriptions,
+      (id) => this.deps.state.forSubscription(id),
+      subscriptionId,
+    );
   }
 
   /** The attachment limits, in the units the engine works in (FR-8.4, FR-8.5). */

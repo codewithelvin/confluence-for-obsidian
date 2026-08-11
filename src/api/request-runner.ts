@@ -55,6 +55,7 @@ export class RequestRunner {
     path: string,
     query: QueryParams,
     method: HttpMethod = 'GET',
+    body?: string,
   ): Promise<Result<HttpResponse, AppError>> {
     const token = this.getToken();
     if (token === null) {
@@ -66,16 +67,39 @@ export class RequestRunner {
     }
 
     const url = buildUrl(this.baseUrl, path, query);
-    return this.deps.semaphore.run(() => this.sendWithRetry(url, method, token, path));
+    return this.deps.semaphore.run(() => this.sendWithRetry(url, method, token, path, body));
   }
 
   async json<T>(path: string, query: QueryParams, parse: Parser<T>): Promise<Result<T, AppError>> {
     const response = await this.send(path, query);
     if (!response.ok) return response;
 
+    return this.decode(response.value, parse);
+  }
+
+  /**
+   * A request that carries a JSON body — the page update behind push (FR-5.4).
+   *
+   * Serialised here rather than by the caller so the body and its `Content-Type`
+   * are always set together: `requestUrl` sends a body without one happily, and
+   * Confluence answers such a request with a 415 that says nothing useful.
+   */
+  async jsonBody<T>(
+    path: string,
+    method: HttpMethod,
+    payload: unknown,
+    parse: Parser<T>,
+  ): Promise<Result<T, AppError>> {
+    const response = await this.send(path, {}, method, JSON.stringify(payload));
+    if (!response.ok) return response;
+
+    return this.decode(response.value, parse);
+  }
+
+  private decode<T>(response: HttpResponse, parse: Parser<T>): Result<T, AppError> {
     let body: unknown;
     try {
-      body = JSON.parse(response.value.text);
+      body = JSON.parse(response.text);
     } catch {
       return err(
         new AppError(
@@ -108,17 +132,24 @@ export class RequestRunner {
     method: HttpMethod,
     token: string,
     context: string,
+    body?: string,
   ): Promise<Result<HttpResponse, AppError>> {
     const headers = {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json, application/xml;q=0.9, */*;q=0.8',
       'X-Atlassian-Token': 'no-check',
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     };
 
     let attempt = 0;
     for (;;) {
       attempt += 1;
-      const result = await this.deps.transport.send({ url, method, headers });
+      const result = await this.deps.transport.send({
+        url,
+        method,
+        headers,
+        ...(body === undefined ? {} : { body }),
+      });
 
       // A transport failure is DNS, refusal or TLS — retrying cannot help.
       if (!result.ok) return result;
@@ -128,6 +159,10 @@ export class RequestRunner {
 
       if (response.status >= 200 && response.status < 300) return ok(response);
 
+      // Retrying a bodied request is safe because a page update carries the
+      // version it expects (FR-5.4): if the first attempt actually landed, the
+      // retry comes back 409 and routes to the conflict flow rather than
+      // overwriting anything (FR-5.5).
       const exhausted = attempt >= this.deps.retry.maxAttempts;
       if (exhausted || !isRetryableStatus(response.status)) {
         return err(errorFromStatus(response.status, context));

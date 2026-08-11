@@ -9,16 +9,20 @@ import {
   realScheduler,
 } from './api/rate-limiter';
 import { CredentialStore, resolveSafeStorage } from './auth/credential-store';
+import { registerPushCommands } from './commands/push-commands';
 import { registerCommands } from './commands/register-commands';
 import { SettingsStore } from './settings/settings-store';
 import { ConfluenceSettingTab } from './settings/settings-tab';
 import type { ConnectionProfile, Subscription } from './settings/settings-types';
+import { BackupStore } from './sync/backup-store';
 import { FragmentStore } from './sync/fragment-store';
 import { NoteService } from './sync/note-service';
+import { PushService, type PushPrompts } from './sync/push-service';
 import { SuspensionRegistry } from './sync/suspension';
 import { SyncController } from './sync/sync-controller';
 import { SyncStateStore } from './sync/sync-state';
 import { ConfirmModal } from './ui/confirm-modal';
+import { askAboutConflicts, pushPrompts } from './ui/push-prompts';
 import { describeConstruct, registerPlaceholderRenderer } from './ui/placeholder-renderer';
 import { StatusBar } from './ui/status-bar';
 import { SYNC_PANEL_VIEW_TYPE, SyncPanelView } from './ui/sync-panel-view';
@@ -44,6 +48,7 @@ export default class ConfluenceConnectorPlugin extends Plugin {
   private readonly suspensions = new SuspensionRegistry();
   private readonly controller: SyncController;
   private readonly notes: NoteService;
+  private readonly push: PushService;
   private statusBar: StatusBar | null = null;
 
   /** Shared so the concurrency cap applies across every connection at once. */
@@ -61,9 +66,10 @@ export default class ConfluenceConnectorPlugin extends Plugin {
     );
 
     const state = new ObsidianStateGateway(app, manifest);
-    // One set of gateways, shared: the controller and the note service must agree
-    // about the vault and the index, or a re-pull would see different state from
-    // the sync that wrote it.
+    const now = (): string => new Date().toISOString();
+    // One set of gateways, shared: the controller, the note service and the push
+    // service must agree about the vault and the index, or a re-pull would see
+    // different state from the sync that wrote it.
     const shared = {
       settings: this.settingsStore,
       vault: new ObsidianVaultGateway(app, () =>
@@ -71,9 +77,15 @@ export default class ConfluenceConnectorPlugin extends Plugin {
       ),
       state: new SyncStateStore(state),
       fragments: new FragmentStore(state),
+      backups: new BackupStore({
+        state,
+        logger: this.logger.child('backup'),
+        retentionDays: () => this.settingsStore.get().backupRetentionDays,
+        now,
+      }),
       logger: this.logger.child('sync'),
       createClient: (connection: ConnectionProfile) => this.createClient(connection),
-      now: () => new Date().toISOString(),
+      now,
     };
 
     this.controller = new SyncController({
@@ -82,6 +94,19 @@ export default class ConfluenceConnectorPlugin extends Plugin {
       newId,
     });
     this.notes = new NoteService(shared);
+    this.push = new PushService(shared);
+  }
+
+  /** Modal-backed answers to the questions a push has to ask (FR-5.2, FR-5.7, FR-6.2). */
+  private prompts(): PushPrompts {
+    return pushPrompts({
+      app: this.app,
+      allowForcePush: () => this.settingsStore.get().allowForcePush,
+      pageUrlFor: (notePath) => this.notes.pageUrlFor(notePath),
+      openExternal: (url) => {
+        window.open(url, '_blank');
+      },
+    });
   }
 
   override async onload(): Promise<void> {
@@ -117,6 +142,12 @@ export default class ConfluenceConnectorPlugin extends Plugin {
       openSyncPanel: () => {
         void this.revealSyncPanel();
       },
+    });
+    registerPushCommands({
+      plugin: this,
+      store: this.settingsStore,
+      push: this.push,
+      prompts: () => this.prompts(),
     });
 
     this.registerPlaceholders();
@@ -228,6 +259,8 @@ export default class ConfluenceConnectorPlugin extends Plugin {
   private async runSync(subscription: Subscription): Promise<void> {
     const result = await this.controller.sync(subscription, {
       confirmDeletions: (pages) => this.confirmDeletions(pages.map((page) => page.path)),
+      // Asked before the sync writes anything (§6.6.2 step 5, FR-6.2).
+      resolveConflicts: askAboutConflicts(this.app),
     });
 
     if (!result.ok) {

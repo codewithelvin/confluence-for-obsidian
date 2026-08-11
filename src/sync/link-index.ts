@@ -1,4 +1,6 @@
 import type { PageTarget } from '../convert/types';
+import type { Subscription } from '../settings/settings-types';
+import type { SubscriptionState } from './sync-state';
 
 /**
  * Which Confluence pages are mirrored where (spec FR-4.7).
@@ -20,6 +22,38 @@ export interface MirroredPage extends PageTarget {
 /** Drops the extension, since a wikilink never carries one. */
 export function linkPath(notePath: string): string {
   return notePath.replace(/\.md$/i, '');
+}
+
+/**
+ * Every page the vault mirrors, across every subscription (FR-4.7).
+ *
+ * One function rather than the same loop in each caller: the note service, the
+ * push path and the sync controller all need this table, and a caller that built
+ * it from a subset would silently turn some wikilinks back into URLs on push.
+ *
+ * `exclude` drops one subscription — used by a sync in progress, which derives its
+ * own pages from the placement it is about to make rather than from the index it
+ * is about to replace.
+ */
+export function mirroredPages(
+  subscriptions: readonly Subscription[],
+  stateOf: (subscriptionId: string) => SubscriptionState,
+  exclude: string | null = null,
+): readonly MirroredPage[] {
+  const pages: MirroredPage[] = [];
+
+  for (const subscription of subscriptions) {
+    if (subscription.id === exclude) continue;
+
+    for (const page of Object.values(stateOf(subscription.id).pages)) {
+      pages.push({
+        spaceKey: subscription.spaceKey,
+        title: page.title,
+        path: linkPath(page.localPath),
+      });
+    }
+  }
+  return pages;
 }
 
 /**

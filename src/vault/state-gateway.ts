@@ -22,6 +22,14 @@ export interface StateGateway {
   /** Writes atomically: a crash mid-write leaves the previous version intact. */
   write(name: string, contents: string): Promise<Result<void, AppError>>;
   remove(name: string): Promise<Result<void, AppError>>;
+  /**
+   * Names inside a state subfolder, relative to the state root, or `[]` when the
+   * folder does not exist.
+   *
+   * Needed to prune backups past their retention (FR-6.6): the retention window
+   * cannot be enforced without seeing what is already there.
+   */
+  list(folder: string): Promise<Result<readonly string[], AppError>>;
 }
 
 function stateWriteFailed(name: string, cause: unknown): AppError {
@@ -97,6 +105,20 @@ export class ObsidianStateGateway implements StateGateway {
       return ok(undefined);
     } catch (cause) {
       return err(stateWriteFailed(name, cause));
+    }
+  }
+
+  async list(folder: string): Promise<Result<readonly string[], AppError>> {
+    const path = this.resolve(folder);
+    try {
+      if (!(await this.app.vault.adapter.exists(path))) return ok([]);
+
+      const listed = await this.app.vault.adapter.list(path);
+      // Returned absolute to the vault; the interface speaks in state-relative
+      // names, so the caller can hand one straight back to `read` or `remove`.
+      return ok(listed.files.map((file) => `${folder}/${file.slice(file.lastIndexOf('/') + 1)}`));
+    } catch (cause) {
+      return err(stateWriteFailed(folder, cause));
     }
   }
 

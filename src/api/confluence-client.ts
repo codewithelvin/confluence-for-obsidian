@@ -7,10 +7,12 @@ import {
   parsePaged,
   parseAttachment,
   parseSpace,
+  parseUpdatedPage,
   parseUser,
   type ConfluenceAttachment,
   type ConfluencePage,
   type ConfluencePageRef,
+  type ConfluencePageVersion,
   type ConfluenceSpace,
   type ConfluenceUser,
 } from './api-types';
@@ -40,6 +42,23 @@ export interface ConnectionCheck {
 export type ConfluenceClientDeps = RequestDeps;
 
 /**
+ * One page body being written back (spec §6.2.1, FR-5.4).
+ *
+ * `version` is the number the update is *claiming*, not the one it was read at:
+ * Confluence accepts the write only if that is exactly one past the current
+ * version, which is what turns a stale push into a 409 instead of a silent
+ * overwrite (FR-5.5).
+ */
+export interface PageUpdate {
+  readonly id: string;
+  readonly title: string;
+  readonly spaceKey: string;
+  readonly parentId: string | null;
+  readonly version: number;
+  readonly storage: string;
+}
+
+/**
  * The narrow view of the gateway that sync depends on (spec §6.1).
  *
  * Declared as an interface so the sync engine can be exercised end to end
@@ -61,6 +80,7 @@ export interface ConfluenceGateway {
   getPage(id: string): Promise<Result<ConfluencePage, AppError>>;
   listAttachments(pageId: string): Promise<Result<ConfluenceAttachment[], AppError>>;
   downloadAttachment(downloadPath: string): Promise<Result<ArrayBuffer, AppError>>;
+  updatePage(update: PageUpdate): Promise<Result<ConfluencePageVersion, AppError>>;
 }
 
 /**
@@ -240,6 +260,31 @@ export class ConfluenceClient implements ConfluenceGateway {
       ENDPOINTS.contentById(id),
       { expand: `body.storage,${REF_EXPANSIONS}` },
       parsePage,
+    );
+  }
+
+  /**
+   * Writes a page body back (spec §6.2.1, FR-5.4).
+   *
+   * `ancestors` is sent so the update cannot silently reparent the page: a `PUT`
+   * that omits it is accepted, and on some Data Center versions moves the page to
+   * the top of the space. The title goes with it because Confluence rejects an
+   * update that does not carry one.
+   */
+  async updatePage(update: PageUpdate): Promise<Result<ConfluencePageVersion, AppError>> {
+    return this.runner.jsonBody(
+      ENDPOINTS.contentById(update.id),
+      'PUT',
+      {
+        id: update.id,
+        type: 'page',
+        title: update.title,
+        space: { key: update.spaceKey },
+        ...(update.parentId === null ? {} : { ancestors: [{ id: update.parentId }] }),
+        body: { storage: { value: update.storage, representation: 'storage' } },
+        version: { number: update.version, message: 'Updated from Obsidian' },
+      },
+      parseUpdatedPage,
     );
   }
 }

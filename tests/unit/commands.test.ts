@@ -11,7 +11,7 @@ import { SyncStateStore } from '../../src/sync/sync-state';
 import { SuspensionRegistry } from '../../src/sync/suspension';
 import { Logger } from '../../src/util/logger';
 import type { ConfluenceClient } from '../../src/api/confluence-client';
-import { FakeConfluence, FakeStateGateway, FakeVaultGateway } from '../fakes/sync';
+import { FakeConfluence, FakeStateGateway, FakeVaultGateway, fakeBackups } from '../fakes/sync';
 import {
   App as FakeApp,
   Notice,
@@ -73,6 +73,7 @@ async function setup(): Promise<void> {
     vault,
     state: new SyncStateStore(stateGateway),
     fragments: new FragmentStore(stateGateway),
+    backups: fakeBackups(stateGateway),
     logger,
     createClient: () => client,
     now: () => '2026-08-10T12:00:00Z',

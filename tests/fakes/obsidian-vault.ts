@@ -166,6 +166,14 @@ export class FakeAdapter {
     return Promise.resolve();
   }
 
+  list(path: string): Promise<{ files: string[]; folders: string[] }> {
+    const prefix = `${path}/`;
+    return Promise.resolve({
+      files: [...this.files.keys()].filter((file) => file.startsWith(prefix)),
+      folders: [...this.folders].filter((folder) => folder.startsWith(prefix)),
+    });
+  }
+
   rename(from: string, to: string): Promise<void> {
     if (this.renameOverExistingFails && this.files.has(to)) {
       return Promise.reject(new Error('EEXIST'));

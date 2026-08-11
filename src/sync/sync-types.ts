@@ -6,7 +6,9 @@
 
 import type { AppError } from '../util/errors';
 import type { SkippedAttachment } from './attachment-executor';
+import type { ConflictDecision, ConflictOutcome } from './conflict-executor';
 import type { LocalPage } from './pull-planner';
+import type { PageConflict } from './push-executor';
 import type { UnmappablePage } from '../vault/path-mapper';
 
 /** Coarse phase, for a progress message the user can read at a glance. */
@@ -33,9 +35,12 @@ export interface SyncReport {
   readonly relocated: number;
   readonly deleted: number;
   readonly unchanged: number;
-  /** Pages written but not certified: readable, and read-only until M5 (FR-4.4). */
+  /** Pages written but not certified: readable, and permanently read-only (FR-4.4). */
   readonly degraded: readonly LocalPage[];
+  /** Changed on both sides, as detected (FR-6.1) — before anything was resolved. */
   readonly conflicts: readonly LocalPage[];
+  /** What the user chose for each of them, and what came of it (FR-6.2, FR-6.4). */
+  readonly conflictsResolved: readonly ConflictOutcome[];
   readonly localEdits: readonly LocalPage[];
   readonly orphans: readonly LocalPage[];
   readonly untracked: readonly string[];
@@ -60,4 +65,15 @@ export interface SyncCallbacks {
    * Defaults to refusing: a sync that cannot ask must not delete.
    */
   readonly confirmDeletions?: (pages: readonly LocalPage[]) => Promise<boolean>;
+  /**
+   * Asked about every conflict at once, before any write (FR-6.2, FR-6.5, §6.6.2
+   * step 5).
+   *
+   * Absent means the conflicts are only reported: a sync that cannot ask must not
+   * choose, and leaving both copies alone is the only answer that loses nothing.
+   * Returning a shorter list than it was given is how the user skips one.
+   */
+  readonly resolveConflicts?: (
+    conflicts: readonly PageConflict[],
+  ) => Promise<readonly ConflictDecision[]>;
 }

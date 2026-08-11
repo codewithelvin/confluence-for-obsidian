@@ -7,12 +7,15 @@ import { err, ok, type Result } from '../util/result';
 import { buildPathMap, type PathMap } from '../vault/path-mapper';
 import type { VaultGateway } from '../vault/vault-gateway';
 import { attachmentHook } from './attachment-executor';
+import type { BackupStore } from './backup-store';
+import { conflictPhase, type ConflictPhaseResult } from './conflict-phase';
+import { nextSubscriptionState, type AppliedSync } from './sync-persist';
+import { buildSyncReport } from './sync-report';
 import type { FragmentStore } from './fragment-store';
 import { LinkIndex, linkPath, type MirroredPage } from './link-index';
 import { deletePages, pullPages, relocate, type ExecutorDeps } from './pull-executor';
 import { buildPullPlan, type PullPlan } from './pull-planner';
 import { isSuspendingError, type SuspensionRegistry } from './suspension';
-import type { PageState, SubscriptionState } from './sync-state';
 import type { SyncStateStore } from './sync-state';
 import type { SyncCallbacks, SyncFailure, SyncReport } from './sync-types';
 
@@ -23,8 +26,11 @@ import type { SyncCallbacks, SyncFailure, SyncReport } from './sync-types';
  * `ConfluenceClient` or `VaultGateway`, which is what lets the whole engine be
  * tested end to end with no network and no file system (spec §7.5).
  *
- * Read-only in M3. Pushing local edits, and resolving the conflicts this
- * reports, arrive with M5.
+ * Pulling is the whole of a sync's *automatic* behaviour. A sync never pushes on
+ * its own initiative: §6.6.2's push step is reached only through an answer the
+ * user gave to a conflict — "Keep Local" — or through the explicit push commands
+ * in `PushService` (FR-5.1, FR-5.6). Publishing a typo to a corporate wiki because
+ * somebody pressed Sync is exactly what §1.2's "when in doubt, read" rules out.
  */
 
 export interface SyncEngineDeps {
@@ -32,6 +38,8 @@ export interface SyncEngineDeps {
   readonly state: SyncStateStore;
   readonly fragments: FragmentStore;
   readonly suspensions: SuspensionRegistry;
+  /** Copies a note aside before a conflict resolution overwrites it (FR-6.6). */
+  readonly backups: BackupStore;
   readonly logger: Logger;
   /** Injected so reports and state records are deterministic under test (§7.5). */
   readonly now: () => string;
@@ -238,6 +246,13 @@ export class SyncEngine {
   ): Promise<SyncReport> {
     const executor = this.executorFor(request, linkIndex);
     const failures: SyncFailure[] = [];
+
+    // Step 5 before step 6: a "Keep Remote" answer discards local edits, and
+    // asking for it after the sync had started rewriting notes would be asking
+    // about a state that no longer exists.
+    const resolved = await this.resolveConflicts(request, plan, executor, callbacks);
+    failures.push(...resolved.failures);
+
     const relocated = await this.relocateAll(executor, plan, failures);
     const deleted = await this.deleteAll(executor, plan, callbacks, failures);
 
@@ -249,27 +264,57 @@ export class SyncEngine {
     });
     failures.push(...pulled.failures);
 
-    await this.persist(request, plan, { relocated, deleted, states: pulled.states });
+    await this.persist(
+      request,
+      {
+        relocated,
+        deleted,
+        // Conflict outcomes first, so a page the sync also pulled ends on the
+        // pull's record rather than the resolution's — they cannot both be right,
+        // and the pull is the later write.
+        states: [
+          ...resolved.outcomes.flatMap((o) => (o.state === null ? [] : [o.state])),
+          ...pulled.states,
+        ],
+      },
+      plan,
+    );
 
-    return {
+    return buildSyncReport({
       subscriptionId: request.subscription.id,
-      pulled: pulled.states.length,
+      plan,
+      conflicts: resolved,
       relocated: relocated.length,
       deleted: deleted.length,
-      unchanged: plan.unchanged,
-      degraded: pulled.degraded,
-      conflicts: plan.conflicts,
-      localEdits: plan.localEdits,
-      orphans: plan.orphans,
-      untracked: plan.untracked,
-      truncated: plan.truncated,
-      attachmentsDownloaded: pulled.attachmentsDownloaded,
-      skippedAttachments: pulled.skippedAttachments,
-      unmappable: plan.unmappable,
+      pulled,
       failures,
       cancelled: callbacks.isCancelled?.() === true,
       finishedAt: this.deps.now(),
-    };
+    });
+  }
+
+  /** The conflict step (spec §6.6.2 step 5, FR-6.2, FR-6.5). */
+  private resolveConflicts(
+    request: SyncRequest,
+    plan: PullPlan,
+    executor: ExecutorDeps,
+    callbacks: SyncCallbacks,
+  ): Promise<ConflictPhaseResult> {
+    const { spaceKey } = request.subscription;
+
+    return conflictPhase(
+      {
+        push: { ...executor, spaceKey },
+        pull: executor,
+        backups: this.deps.backups,
+      },
+      {
+        conflicts: plan.conflicts,
+        pages: this.deps.state.forSubscription(request.subscription.id).pages,
+        spaceKey,
+        resolve: callbacks.resolveConflicts,
+      },
+    );
   }
 
   private async relocateAll(
@@ -308,36 +353,15 @@ export class SyncEngine {
 
   private async persist(
     request: SyncRequest,
+    applied: Omit<AppliedSync, 'forget'>,
     plan: PullPlan,
-    applied: {
-      relocated: PullPlan['relocate'];
-      deleted: PullPlan['deleteLocal'];
-      states: readonly PageState[];
-    },
   ): Promise<void> {
-    const pages = new Map(
-      Object.entries(this.deps.state.forSubscription(request.subscription.id).pages),
+    const next = nextSubscriptionState(
+      this.deps.state.forSubscription(request.subscription.id),
+      { ...applied, forget: plan.forget },
+      this.deps.now(),
     );
 
-    for (const item of applied.relocated) {
-      const previous = pages.get(item.pageId);
-      if (previous !== undefined) {
-        pages.set(item.pageId, {
-          ...previous,
-          localPath: item.to,
-          title: item.title,
-          isFolderNote: item.isFolderNote,
-        });
-      }
-    }
-    for (const state of applied.states) pages.set(state.pageId, state);
-    for (const page of applied.deleted) pages.delete(page.pageId);
-    for (const pageId of plan.forget) pages.delete(pageId);
-
-    const next: SubscriptionState = {
-      lastSyncedAt: this.deps.now(),
-      pages: Object.fromEntries(pages),
-    };
     const saved = await this.deps.state.replace(request.subscription.id, next);
     if (!saved.ok) this.deps.logger.warn(saved.error.userMessage);
   }

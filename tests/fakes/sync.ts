@@ -5,16 +5,23 @@
  * zero file system. These are the two fakes that make that true.
  */
 
-import type { ConfluenceGateway, ConnectionCheck } from '../../src/api/confluence-client';
+import type {
+  ConfluenceGateway,
+  ConnectionCheck,
+  PageUpdate,
+} from '../../src/api/confluence-client';
 import type {
   ConfluenceAttachment,
   ConfluencePage,
   ConfluencePageRef,
+  ConfluencePageVersion,
 } from '../../src/api/api-types';
+import { BackupStore } from '../../src/sync/backup-store';
 import { AppError } from '../../src/util/errors';
 import { sha256 } from '../../src/util/hash';
+import { Logger } from '../../src/util/logger';
 import { err, ok, type Result } from '../../src/util/result';
-import type { ConfluenceIdentity } from '../../src/vault/frontmatter';
+import type { ConflictCopy, ConfluenceIdentity } from '../../src/vault/frontmatter';
 import type { StateGateway } from '../../src/vault/state-gateway';
 import type { NoteWrite, ScannedNote, VaultGateway } from '../../src/vault/vault-gateway';
 
@@ -32,6 +39,9 @@ export class FakeVaultGateway implements VaultGateway {
   readonly failWrites = new Set<string>();
   vaultLength = 20;
 
+  /** Paths the fake reports as "Save Both" snapshots, which sync must ignore. */
+  readonly conflictCopies = new Set<string>();
+
   /** Seeds a note that the plugin did not write — an untracked candidate. */
   addForeignNote(path: string, content: string): void {
     this.files.set(path, content);
@@ -45,9 +55,18 @@ export class FakeVaultGateway implements VaultGateway {
         path,
         hash: await sha256(content),
         identity: this.identities.get(path) ?? null,
+        isConflictCopy: this.conflictCopies.has(path),
       });
     }
     return ok(notes);
+  }
+
+  read(path: string): Promise<Result<string, AppError>> {
+    const content = this.files.get(path);
+    if (content === undefined) {
+      return Promise.resolve(err(new AppError('NOT_FOUND', `There is no note at "${path}".`)));
+    }
+    return Promise.resolve(ok(content));
   }
 
   async writeNote(write: NoteWrite): Promise<Result<string, AppError>> {
@@ -60,6 +79,48 @@ export class FakeVaultGateway implements VaultGateway {
     this.identities.set(write.path, write.identity);
     this.writes.push(write.path);
     return Promise.resolve(ok(content));
+  }
+
+  /**
+   * Rewrites the identity block and leaves the body alone, as the real gateway
+   * does — the push path depends on the body surviving a version bump untouched.
+   */
+  updateIdentity(path: string, identity: ConfluenceIdentity): Promise<Result<string, AppError>> {
+    if (this.failWrites.has(path)) {
+      return Promise.resolve(err(new AppError('VAULT_WRITE_FAILED', `Refusing to write ${path}`)));
+    }
+
+    const existing = this.files.get(path);
+    if (existing === undefined) {
+      return Promise.resolve(err(new AppError('NOT_FOUND', `There is no note at "${path}".`)));
+    }
+
+    const body = existing.replace(/^---\n[\s\S]*?\n---\n/, '');
+    const content = `---\nconfluence:\n  id: ${identity.id}\n  version: ${String(identity.version)}\n---\n${body}`;
+    this.files.set(path, content);
+    this.identities.set(path, identity);
+    this.writes.push(path);
+    return Promise.resolve(ok(content));
+  }
+
+  writeConflictCopy(
+    path: string,
+    body: string,
+    copy: ConflictCopy,
+  ): Promise<Result<void, AppError>> {
+    if (this.failWrites.has(path)) {
+      return Promise.resolve(err(new AppError('VAULT_WRITE_FAILED', `Refusing to write ${path}`)));
+    }
+
+    this.files.set(
+      path,
+      `---\nconfluenceRemoteCopy:\n  pageId: ${copy.pageId}\n  version: ${String(copy.version)}\n---\n${body}`,
+    );
+    // Recorded as the real gateway's scan would report it, so a later sync in the
+    // same test sees a file it must ignore rather than an untracked candidate.
+    this.conflictCopies.add(path);
+    this.writes.push(path);
+    return Promise.resolve(ok(undefined));
   }
 
   writeBinary(path: string, bytes: ArrayBuffer): Promise<Result<void, AppError>> {
@@ -147,6 +208,30 @@ export class FakeStateGateway implements StateGateway {
     this.files.delete(name);
     return Promise.resolve(ok(undefined));
   }
+
+  list(folder: string): Promise<Result<readonly string[], AppError>> {
+    const prefix = `${folder}/`;
+    return Promise.resolve(ok([...this.files.keys()].filter((name) => name.startsWith(prefix))));
+  }
+}
+
+/**
+ * A backup store over the same in-memory state a test already has.
+ *
+ * Every consumer of `SyncEngineDeps`/`NoteServiceDeps` needs one, and it is the
+ * kind of dependency a test should not have to think about unless it is the thing
+ * under test — in which case it reaches into `state.files` directly.
+ */
+export function fakeBackups(
+  state: StateGateway,
+  now: () => string = () => '2026-08-10T12:00:00Z',
+): BackupStore {
+  return new BackupStore({
+    state,
+    logger: new Logger('test', () => false),
+    retentionDays: () => 14,
+    now,
+  });
 }
 
 export interface FakePage {
@@ -231,6 +316,52 @@ export class FakeConfluence implements ConfluenceGateway {
       return Promise.resolve(err(new AppError('NOT_FOUND', `no page ${id}`)));
     }
     return Promise.resolve(ok({ ...this.toRef(page), storage: page.storage ?? '<p>body</p>' }));
+  }
+
+  /** Every page update the push path attempted, in order. */
+  readonly updates: PageUpdate[] = [];
+  /** Page ids whose update should answer 409, to exercise FR-5.5. */
+  readonly conflictOnUpdate = new Set<string>();
+  updateError: AppError | null = null;
+
+  updatePage(update: PageUpdate): Promise<Result<ConfluencePageVersion, AppError>> {
+    this.updates.push(update);
+
+    if (this.conflictOnUpdate.has(update.id)) {
+      return Promise.resolve(
+        err(
+          new AppError(
+            'CONFLICT',
+            'This page was changed in Confluence since it was last synced.',
+            {
+              status: 409,
+            },
+          ),
+        ),
+      );
+    }
+    if (this.updateError !== null) return Promise.resolve(err(this.updateError));
+
+    const index = this.pages.findIndex((candidate) => candidate.id === update.id);
+    const existing = this.pages[index];
+    if (index >= 0 && existing !== undefined) {
+      this.pages[index] = {
+        ...existing,
+        title: update.title,
+        version: update.version,
+        storage: update.storage,
+      };
+    }
+
+    return Promise.resolve(
+      ok({
+        id: update.id,
+        title: update.title,
+        version: update.version,
+        updatedAt: '2026-08-11T09:00:00Z',
+        updatedBy: 'tester',
+      }),
+    );
   }
 
   private toRef(page: FakePage): ConfluencePageRef {

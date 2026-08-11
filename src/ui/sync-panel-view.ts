@@ -56,12 +56,58 @@ export function renderList(parent: HTMLElement, title: string, items: readonly s
 }
 
 function summaryOf(report: SyncReport): string {
-  return [
+  const parts = [
     `${String(report.pulled)} pulled`,
     `${String(report.relocated)} moved`,
     `${String(report.deleted)} deleted`,
     `${String(report.unchanged)} unchanged`,
-  ].join(' · ');
+  ];
+
+  const pushed = report.conflictsResolved.filter((outcome) => outcome.choice === 'keep-local');
+  if (pushed.length > 0) parts.push(`${String(pushed.length)} pushed`);
+
+  return parts.join(' · ');
+}
+
+/**
+ * Conflicts the user has not settled.
+ *
+ * A conflict that was resolved is history; one that was skipped, or whose
+ * resolution failed, is still a decision waiting to be made and belongs in the
+ * panel until it is (FR-10.2).
+ */
+function unresolved(report: SyncReport): readonly string[] {
+  const settled = new Set(
+    report.conflictsResolved
+      .filter((outcome) => outcome.choice !== 'skip' && outcome.error === null)
+      .map((outcome) => outcome.pageId),
+  );
+  return report.conflicts.filter((page) => !settled.has(page.pageId)).map((page) => page.path);
+}
+
+/**
+ * Everything to do with conflicts (FR-6.2, FR-6.4).
+ *
+ * The conflict-copy group is the answer to §16 **O6**: a "Save Both" snapshot is
+ * kept until the user deletes it, so the panel is where it stays visible rather
+ * than quietly accumulating in the mount.
+ */
+function renderConflicts(parent: HTMLElement, report: SyncReport): void {
+  renderList(parent, 'Conflicts — changed here and in Confluence', unresolved(report));
+  renderList(
+    parent,
+    'Conflict copies — delete them once merged',
+    report.conflictsResolved.flatMap((outcome) =>
+      outcome.copyPath === null ? [] : [outcome.copyPath],
+    ),
+  );
+  renderList(
+    parent,
+    'Conflict resolutions that failed',
+    report.conflictsResolved.flatMap((outcome) =>
+      outcome.error === null ? [] : [`${outcome.title}: ${outcome.error.userMessage}`],
+    ),
+  );
 }
 
 function renderReport(parent: HTMLElement, report: SyncReport): void {
@@ -71,14 +117,10 @@ function renderReport(parent: HTMLElement, report: SyncReport): void {
     parent.createDiv({ cls: 'confluence-panel-warning', text: 'The last sync was cancelled.' });
   }
 
+  renderConflicts(parent, report);
   renderList(
     parent,
-    'Conflicts — changed here and in Confluence',
-    report.conflicts.map((page) => page.path),
-  );
-  renderList(
-    parent,
-    'Edited locally',
+    'Edited locally — push when ready',
     report.localEdits.map((page) => page.path),
   );
   renderList(
