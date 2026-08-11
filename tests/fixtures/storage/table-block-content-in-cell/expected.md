@@ -1,5 +1,1 @@
-```confluence-block
-id: cfb-0001
-type: table
-label: table with merged cells, block content, or no header row
-```
+<table><tbody><tr><th>A</th></tr><tr><td><ul><li>listed</li></ul></td></tr></tbody></table>

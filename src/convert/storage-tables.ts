@@ -1,6 +1,7 @@
 import type { PhrasingContent, RootContent, Table, TableCell, TableRow } from 'mdast';
 import { makeBlockPlaceholder } from './placeholder-factory';
-import { childrenOf, tagOf } from './storage-parser';
+import { childrenOf, hasNamespacedMarkup, tagOf } from './storage-parser';
+import { FAITHFUL, serialiseElement } from './storage-serialiser';
 import type { ConversionContext } from './types';
 
 /**
@@ -181,13 +182,37 @@ function asCellContent(nodes: readonly PhrasingContent[]): PhrasingContent[] {
   return nodes.map((node) => (node.type === 'break' ? { type: 'html', value: '<br/>' } : node));
 }
 
+/**
+ * A table GFM cannot express, written into the note as the HTML it already is
+ * (spec FR-4.10, decision D15).
+ *
+ * Storage format *is* XHTML and Markdown allows block HTML, so a table with
+ * merged cells can simply *be* itself: Obsidian renders `colspan` and `rowspan`,
+ * the reverse pass hands an `html` node straight back, and the round trip is
+ * exact. 4 733 of space EP's 5 414 preserved tables — 87.4% — qualify.
+ *
+ * `null` when the table holds `ac:`- or `ri:`-namespaced markup, which Obsidian
+ * renders as *nothing* (FR-4.9): writing such a table out would show empty cells
+ * where an image or a link belongs, which is worse than an honest placeholder.
+ */
+function tableAsHtml(table: Element): RootContent | null {
+  if (hasNamespacedMarkup(table)) return null;
+
+  return { type: 'html', value: serialiseElement(table, FAITHFUL) };
+}
+
 export function convertTable(table: Element, ctx: ConversionContext): RootContent {
   const analysed = analyseTable(table);
   if (analysed === null) {
-    return makeBlockPlaceholder(ctx.placeholders, table, {
-      type: 'table',
-      label: 'table with merged cells, block content, or no header row',
-    });
+    // GFM cannot hold it, but HTML can — and a visible table beats a labelled
+    // widget hiding what is often the whole point of the page.
+    return (
+      tableAsHtml(table) ??
+      makeBlockPlaceholder(ctx.placeholders, table, {
+        type: 'table',
+        label: 'table containing Confluence macros, images or links',
+      })
+    );
   }
 
   const rows: TableRow[] = analysed.rows.map((cells) => ({

@@ -72,6 +72,16 @@ describe('whitespace the canonicalisations move (§6.4.5)', () => {
     expect(certified(`<p>${red}a</span>${red}b</span></p>`)).toBe(true);
   });
 
+  it('merges emphasis written under either of its two tag names', () => {
+    // `<strong>` and `<b>` render identically and Markdown writes them the same,
+    // so a separator between them is noise. Comparing tag names literally left
+    // `**&#x200B;**` in the middle of a heading — the last of the artefacts the
+    // client reported.
+    expect(certified('<p><strong>a</strong><b>b</b></p>')).toBe(true);
+    expect(certified('<p><em>a</em><i>b</i></p>')).toBe(true);
+    expect(certified('<p><em><strong>a</strong><b>b</b></em></p>')).toBe(true);
+  });
+
   it('keeps emphasis that is nothing but a space', () => {
     expect(certified('<p>a<strong> </strong>b</p>')).toBe(true);
   });

@@ -297,6 +297,27 @@ function liftEdgeWhitespace(element: Element): void {
   if (!hasContent(element)) unwrap(element);
 }
 
+/**
+ * Tags that are two spellings of one rendering.
+ *
+ * Confluence's editor emits both, sometimes side by side in one sentence, and
+ * Markdown has a single form for each pair — so `<strong>a</strong><b>b</b>`
+ * became `**a**`, a zero-width separator, then `**b**`, which is what put
+ * `**&#x200B;**` in the middle of a heading.
+ */
+const TAG_ALIASES = new Map([
+  ['b', 'strong'],
+  ['i', 'em'],
+  ['strike', 's'],
+  ['del', 's'],
+]);
+
+/** The tag a pair of aliases both stand for. */
+function canonicalTag(element: Element): string {
+  const tag = tagOf(element);
+  return TAG_ALIASES.get(tag) ?? tag;
+}
+
 /** Inline formatting that can absorb an identical neighbour without any visible change. */
 const MERGEABLE = new Set([
   'strong',
@@ -350,9 +371,12 @@ function mergeAdjacentInline(parent: Element): void {
       continue;
     }
 
+    // Compared by canonical tag, so `<strong>` absorbs an adjacent `<b>`: they
+    // render the same and Markdown writes them the same, so a separator between
+    // them is noise the reader has to look past.
     if (
       previous !== null &&
-      tagOf(previous) === tag &&
+      canonicalTag(previous) === canonicalTag(element) &&
       signature(previous) === signature(element)
     ) {
       while (element.firstChild !== null) previous.appendChild(element.firstChild);

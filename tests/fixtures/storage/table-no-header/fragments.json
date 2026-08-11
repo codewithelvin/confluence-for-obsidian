@@ -1,10 +1,1 @@
-[
-  {
-    "id": "cfb-0001",
-    "kind": "block",
-    "xhtml": "<table><tbody><tr><td>a</td><td>1</td></tr></tbody></table>",
-    "type": "table",
-    "name": null,
-    "label": "table with merged cells, block content, or no header row"
-  }
-]
+[]

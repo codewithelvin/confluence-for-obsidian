@@ -157,12 +157,29 @@ describe('tables freed by the discard pass (§6.4.6)', () => {
     expect(certified(storage)).toBe(true);
   });
 
-  it('still preserves a table with merged cells, which GFM cannot express', () => {
+  it('writes a merged-cell table as HTML rather than hiding it (D15)', () => {
+    // GFM cannot express a colspan, but Obsidian renders one — and storage format
+    // is already XHTML, so the table can simply be itself. Visible *and* still
+    // pushable, which the placeholder never was.
     const storage =
       '<table><tbody><tr><th>A</th><th>B</th></tr>' +
       '<tr><td colspan="2">merged</td></tr></tbody></table>';
 
+    expect(convert(storage)).toBe(`${storage}\n`);
+    expect(fragmentCount(storage)).toBe(0);
+    expect(certified(storage)).toBe(true);
+  });
+
+  it('keeps a table opaque when a cell holds markup Obsidian cannot render (FR-4.9)', () => {
+    // An `ac:image` written into a note renders as *nothing*, so the reader would
+    // see an empty cell where the picture belongs. 681 of EP's tables are this.
+    const storage =
+      '<table><tbody><tr><th>A</th><th>B</th></tr>' +
+      '<tr><td colspan="2"><ac:image><ri:attachment ri:filename="a.png"/></ac:image></td></tr>' +
+      '</tbody></table>';
+
     expect(fragmentCount(storage)).toBe(1);
+    expect(convert(storage)).not.toContain('<ac:');
     expect(certified(storage)).toBe(true);
   });
 });
