@@ -114,6 +114,22 @@ export interface ConfluenceComment {
   readonly inlineRef: string | null;
 }
 
+/**
+ * A comment as the *change* query reports it (§16 O16).
+ *
+ * Deliberately not a `ConfluenceComment`: this search never asks for a body, because
+ * all the sync needs from it is which page to re-pull and when the comment moved.
+ * Asking for bodies here would download every changed comment in the space twice —
+ * once to find the pages, and again when each of those pages is pulled.
+ */
+export interface ConfluenceCommentRef {
+  readonly id: string;
+  /** The page the comment hangs off, from `expand=container`. */
+  readonly pageId: string;
+  /** ISO-8601 instant carrying the server's own offset. Compared as a date, never as text. */
+  readonly updatedAt: string;
+}
+
 /** An attachment on a page, as the `child/attachment` endpoint reports it. */
 export interface ConfluenceAttachment {
   readonly id: string;
@@ -265,6 +281,30 @@ function readLabels(raw: Record<string, unknown>): readonly string[] {
     return name === null ? [] : [name];
   });
 }
+
+/**
+ * Validates a comment reference from the change query (§16 O16).
+ *
+ * A record with no container is dropped rather than failing the search: a comment
+ * whose page the response does not name is one the sync could not act on anyway, and
+ * `parsePaged` already treats an unreadable entry as one fewer result.
+ */
+export const parseCommentRef: Parser<ConfluenceCommentRef> = (raw) => {
+  if (!isRecord(raw)) return err(malformed('a comment'));
+
+  const id = asNonEmptyString(raw['id']);
+  const pageId = asNonEmptyString(readPath(raw, 'container', 'id'));
+  if (id === null || pageId === null) return err(malformed('a comment'));
+
+  return ok({
+    id,
+    pageId,
+    updatedAt:
+      asNonEmptyString(readPath(raw, 'version', 'when')) ??
+      asNonEmptyString(readPath(raw, 'history', 'lastUpdated', 'when')) ??
+      '',
+  });
+};
 
 /**
  * Validates a comment.

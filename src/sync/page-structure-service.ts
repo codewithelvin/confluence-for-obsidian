@@ -9,6 +9,14 @@ import { err, ok, type Result } from '../util/result';
 import { splitFrontmatter } from '../vault/frontmatter';
 import { parentPath, type VaultGateway } from '../vault/vault-gateway';
 import { conversionOptionsFor } from './conversion-options';
+import {
+  applyDemotions,
+  planDemotions,
+  type DemotionOp,
+  type TidyDeps,
+  type TidyOutcome,
+  type TidyPlan,
+} from './demotion';
 import type { FragmentStore } from './fragment-store';
 import { LinkIndex, mirroredPages } from './link-index';
 import { singlePageExecutor } from './single-page-deps';
@@ -227,6 +235,31 @@ export class PageStructureService {
     await this.deps.fragments.remove(pageId);
     await this.forget(subscription.id, pageId);
     return ok(undefined);
+  }
+
+  /**
+   * The folder notes in a subscription that no longer need their folders (§6.5.4).
+   *
+   * Planning and applying are separate calls because FR-7.8's preview sits between
+   * them: the user sees the whole list, and nothing moves until they say so.
+   */
+  planTidy(subscription: Subscription): TidyPlan {
+    return planDemotions(this.tidy(), subscription);
+  }
+
+  /** Carries out the demotions the user confirmed. */
+  applyTidy(subscription: Subscription, ops: readonly DemotionOp[]): Promise<TidyOutcome> {
+    return applyDemotions(this.tidy(), subscription, ops);
+  }
+
+  /** What the demotion helpers need, bound to this service's own gateways. */
+  private tidy(): TidyDeps {
+    return {
+      vault: this.deps.vault,
+      state: this.deps.state,
+      logger: this.deps.logger,
+      record: (subscriptionId, page) => this.record(subscriptionId, page),
+    };
   }
 
   /** Whether the note's Markdown survives a round trip, and the storage it produces. */

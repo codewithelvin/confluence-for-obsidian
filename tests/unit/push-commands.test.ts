@@ -36,7 +36,15 @@ const SUBSCRIPTION: Subscription = {
 };
 
 function emptyReport(extra: Partial<PushReport> = {}): PushReport {
-  return { pushed: [], blocked: [], warnings: [], conflicts: [], skipped: 0, ...extra };
+  return {
+    pushed: [],
+    blocked: [],
+    warnings: [],
+    conflicts: [],
+    skipped: 0,
+    cancelled: false,
+    ...extra,
+  };
 }
 
 interface Recorded {
@@ -106,6 +114,18 @@ describe('registration (FR-5.1, §7.4)', () => {
     expect(plugin.commands.every((command) => !('hotkeys' in command))).toBe(true);
   });
 
+  it('offers a way to stop a batch push (FR-10.6)', async () => {
+    expect(plugin.commands.map((command) => command.id)).toContain('stop-push');
+
+    // Nothing running: it says so rather than arming a flag that would then stop
+    // the *next* push the user starts.
+    await run('stop-push');
+    expect(Notice.shown.at(-1)).toContain('No push is running');
+
+    await run('push-modified-pages');
+    expect(recorded.subscriptions).toEqual(['ENG']);
+  });
+
   it('does not put the plugin name in a command title (§7.4)', () => {
     // Obsidian adds the prefix itself; repeating it reads as "Confluence 4
     // Obsidian: Confluence: push…".
@@ -172,7 +192,7 @@ describe('pushing everything modified', () => {
     // is information the user needs.
     await run('push-modified-pages');
 
-    expect(Notice.shown[0]).toContain('0 pushed');
+    expect(Notice.shown.at(-1)).toContain('0 pushed');
   });
 
   it('counts what was pushed, skipped, blocked and resolved', async () => {
@@ -205,7 +225,7 @@ describe('pushing everything modified', () => {
 
     await run('push-modified-pages');
 
-    const notice = Notice.shown[0] ?? '';
+    const notice = Notice.shown.at(-1) ?? '';
     expect(notice).toContain('1 pushed');
     expect(notice).toContain('12 unchanged');
     expect(notice).toContain('1 blocked');
@@ -233,7 +253,7 @@ describe('pushing everything modified', () => {
 
     await run('push-modified-pages');
 
-    expect(Notice.shown[0]).not.toContain('resolved');
+    expect(Notice.shown.at(-1)).not.toContain('resolved');
   });
 
   it('names the space when a whole subscription could not be pushed', async () => {
@@ -241,6 +261,6 @@ describe('pushing everything modified', () => {
 
     await run('push-modified-pages');
 
-    expect(Notice.shown[0]).toContain('ENG:');
+    expect(Notice.shown.at(-1)).toContain('ENG:');
   });
 });

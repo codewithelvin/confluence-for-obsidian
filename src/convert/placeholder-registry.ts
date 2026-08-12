@@ -80,6 +80,47 @@ export function readInlinePlaceholderId(inlineCodeValue: string): string | null 
   return INLINE_PATTERN.exec(inlineCodeValue.trim())?.[1] ?? null;
 }
 
+/** One inline sentinel found in Markdown source, backticks included. */
+export interface InlinePlaceholderMatch {
+  readonly id: string;
+  /** Offset of the opening backtick. */
+  readonly from: number;
+  /** Offset just past the closing backtick. */
+  readonly to: number;
+}
+
+/** The sentinel as it appears in the *note*: a whole inline-code span, backticks and all. */
+const SOURCE_PATTERN = /`\{cf:cfb-\d+\}`/g;
+const SOURCE_OPENING = '`{cf:'.length;
+const SOURCE_CLOSING = '}`'.length;
+
+/**
+ * Every inline sentinel in a stretch of Markdown source (spec FR-4.5, D16).
+ *
+ * The Reading View renderer works on rendered HTML and asks `readInlinePlaceholderId`
+ * whether a `<code>` element is a sentinel. Live Preview has no HTML to inspect — it
+ * decorates the *source text* — so it needs the same grammar expressed over a string.
+ * D16 requires the two renderers to stay in step, which is why both forms live here
+ * rather than one of them living beside its renderer.
+ */
+export function findInlinePlaceholders(markdown: string): readonly InlinePlaceholderMatch[] {
+  // A fresh regex per call: `lastIndex` on a shared global pattern would make the
+  // result depend on who scanned last.
+  const pattern = new RegExp(SOURCE_PATTERN.source, 'g');
+  const found: InlinePlaceholderMatch[] = [];
+
+  let match = pattern.exec(markdown);
+  while (match !== null) {
+    found.push({
+      id: match[0].slice(SOURCE_OPENING, -SOURCE_CLOSING),
+      from: match.index,
+      to: match.index + match[0].length,
+    });
+    match = pattern.exec(markdown);
+  }
+  return found;
+}
+
 /**
  * Marks the embed in front of it as carrying preserved source (spec FR-8.2).
  *

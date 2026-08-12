@@ -19,10 +19,12 @@ import {
   toFrontmatterValue,
   type ConflictCopy,
 } from './frontmatter';
+import { MAX_ABSOLUTE_PATH } from './filename-sanitiser';
 import {
   isInsideMount,
   outOfMount,
   parentPath,
+  pathTooLong,
   vaultWriteFailed,
   type MountSupplier,
   type NoteWrite,
@@ -61,6 +63,11 @@ export class ObsidianVaultGateway implements VaultGateway {
       this.app.vault.getFileByPath(normalised) !== null ||
       this.app.vault.getFolderByPath(normalised) !== null
     );
+  }
+
+  folderEntries(path: string): readonly string[] {
+    const folder = this.app.vault.getFolderByPath(normalizePath(path));
+    return folder === null ? [] : folder.children.map((child) => child.path);
   }
 
   readIdentity(path: string): ConfluenceIdentity | null {
@@ -165,7 +172,7 @@ export class ObsidianVaultGateway implements VaultGateway {
 
   async writeNote(write: NoteWrite): Promise<Result<string, AppError>> {
     const path = normalizePath(write.path);
-    const guard = this.guard(path);
+    const guard = this.guardWrite(path);
     if (guard !== null) return err(guard);
 
     try {
@@ -233,7 +240,7 @@ export class ObsidianVaultGateway implements VaultGateway {
     copy: ConflictCopy,
   ): Promise<Result<void, AppError>> {
     const normalised = normalizePath(path);
-    const guard = this.guard(normalised);
+    const guard = this.guardWrite(normalised);
     if (guard !== null) return err(guard);
 
     try {
@@ -263,7 +270,7 @@ export class ObsidianVaultGateway implements VaultGateway {
    */
   async writeBinary(path: string, bytes: ArrayBuffer): Promise<Result<void, AppError>> {
     const normalised = normalizePath(path);
-    const guard = this.guard(normalised);
+    const guard = this.guardWrite(normalised);
     if (guard !== null) return err(guard);
 
     try {
@@ -304,7 +311,9 @@ export class ObsidianVaultGateway implements VaultGateway {
   async move(from: string, to: string): Promise<Result<void, AppError>> {
     const source = normalizePath(from);
     const target = normalizePath(to);
-    const guard = this.guard(source) ?? this.guard(target);
+    // The source is only checked for containment: a file already sitting at an
+    // over-long path is precisely one the user may need moved somewhere shorter.
+    const guard = this.guard(source) ?? this.guardWrite(target);
     if (guard !== null) return err(guard);
 
     const file = this.app.vault.getFileByPath(source) ?? this.app.vault.getFolderByPath(source);
@@ -366,5 +375,20 @@ export class ObsidianVaultGateway implements VaultGateway {
   /** `null` when the path may be touched, otherwise the error explaining why not. */
   private guard(path: string): AppError | null {
     return isInsideMount(path, this.mounts().map(normalizePath)) ? null : outOfMount(path);
+  }
+
+  /**
+   * The guard for anything that *creates* a path (§6.5.3, §6.8 `PATH_TOO_LONG`).
+   *
+   * Separate from `guard` because the length check must not apply to reading,
+   * trashing or tidying: a file already at an over-long path is exactly the one the
+   * user needs the plugin to be able to remove.
+   */
+  private guardWrite(path: string): AppError | null {
+    const contained = this.guard(path);
+    if (contained !== null) return contained;
+
+    const absolute = this.vaultPathLength() + path.length;
+    return absolute <= MAX_ABSOLUTE_PATH ? null : pathTooLong(path, absolute);
   }
 }

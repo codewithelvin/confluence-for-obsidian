@@ -24,6 +24,13 @@ export class TFile extends TAbstractFile {
   get extension(): string {
     return this.path.slice(this.path.lastIndexOf('.') + 1);
   }
+
+  /** File name without its extension, as Obsidian reports it. */
+  get basename(): string {
+    const name = this.name;
+    const dot = name.lastIndexOf('.');
+    return dot <= 0 ? name : name.slice(0, dot);
+  }
 }
 
 export class TFolder extends TAbstractFile {
@@ -349,7 +356,20 @@ export class FileManager {
 }
 
 export class MetadataCache {
+  /** Handlers registered through `on`, so a test can fire one. */
+  private readonly listeners = new Map<string, ((file: TFile) => void)[]>();
+
   constructor(private readonly vault: Vault) {}
+
+  on(name: string, handler: (file: TFile) => void): { name: string } {
+    this.listeners.set(name, [...(this.listeners.get(name) ?? []), handler]);
+    return { name };
+  }
+
+  /** Test helper: fires a metadata event as Obsidian does once a file has changed. */
+  emit(name: string, file: TFile): void {
+    for (const handler of this.listeners.get(name) ?? []) handler(file);
+  }
 
   getFileCache(file: TFile): { frontmatter: Record<string, unknown> } | null {
     const content = this.vault.contentOf(file.path);

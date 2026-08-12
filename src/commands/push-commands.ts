@@ -21,6 +21,16 @@ export interface PushCommandDeps {
   readonly prompts: () => PushPrompts;
 }
 
+/**
+ * Whether the batch push the user started should stop (FR-10.6).
+ *
+ * Module state rather than a field on a service, because it is the *command* that is
+ * running, not the service: `PushService` is stateless by design and pushing a note
+ * from one command while cancelling from another is the same user pressing two keys.
+ */
+let stopRequested = false;
+let pushRunning = false;
+
 export function registerPushCommands(deps: PushCommandDeps): void {
   deps.plugin.addCommand({
     id: 'push-current-page',
@@ -35,6 +45,19 @@ export function registerPushCommands(deps: PushCommandDeps): void {
     name: 'Push all locally modified pages',
     callback: () => {
       void pushAll(deps);
+    },
+  });
+
+  deps.plugin.addCommand({
+    id: 'stop-push',
+    name: 'Stop the push in progress',
+    callback: () => {
+      stopRequested = pushRunning;
+      new Notice(
+        pushRunning
+          ? 'Stopping after the page being pushed. Pages already published stay published.'
+          : 'No push is running.',
+      );
     },
   });
 }
@@ -65,14 +88,43 @@ async function pushAll(deps: PushCommandDeps): Promise<void> {
     new Notice('No Confluence subscriptions yet. Add one in the plugin settings.');
     return;
   }
+  if (pushRunning) {
+    new Notice('A push is already running.');
+    return;
+  }
 
-  for (const subscription of subscriptions) {
-    await pushOne(deps, subscription);
+  stopRequested = false;
+  pushRunning = true;
+  // Duration 0 keeps it up for the whole batch; it is the progress indicator
+  // FR-10.6 asks for, and `Stop the push in progress` is what cancels it.
+  const progress = new Notice('Pushing…', 0);
+
+  try {
+    for (const subscription of subscriptions) {
+      if (stopRequested) break;
+      await pushOne(deps, subscription, progress);
+    }
+  } finally {
+    progress.hide();
+    pushRunning = false;
+    stopRequested = false;
   }
 }
 
-async function pushOne(deps: PushCommandDeps, subscription: Subscription): Promise<void> {
-  const result = await deps.push.pushSubscription(subscription, deps.prompts());
+async function pushOne(
+  deps: PushCommandDeps,
+  subscription: Subscription,
+  progress: Notice,
+): Promise<void> {
+  const result = await deps.push.pushSubscription(subscription, deps.prompts(), {
+    onProgress: (done, total) => {
+      progress.setMessage(
+        `${subscription.spaceKey}: pushing ${String(done + 1)} of ${String(total)}…`,
+      );
+    },
+    isCancelled: () => stopRequested,
+  });
+
   if (!result.ok) {
     new Notice(`${subscription.spaceKey}: ${result.error.userMessage}`, 12_000);
     return;
@@ -96,6 +148,7 @@ function announce(report: PushReport, label: string): void {
 
   const resolved = report.conflicts.filter((outcome) => outcome.choice !== 'skip').length;
   if (resolved > 0) parts.push(`${String(resolved)} conflict(s) resolved`);
+  if (report.cancelled) parts.push('stopped early');
 
   const problems = report.blocked.length + report.conflicts.length + report.warnings.length;
   new Notice(

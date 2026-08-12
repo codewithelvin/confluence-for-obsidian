@@ -179,18 +179,33 @@ export interface PlaceholderRendererDeps {
  * Built with `createEl`/`setText` only: page bodies are untrusted input and this
  * is the plugin's XSS boundary (§7.4).
  */
-export function renderInlinePlaceholder(code: HTMLElement, id: string, label: string | null): void {
+export function inlinePlaceholderPill(
+  doc: Document,
+  id: string,
+  label: string | null,
+): HTMLElement {
   // Plain DOM rather than Obsidian's `createSpan`, so the same code runs under the
   // test DOM. `textContent` never parses markup, which is the §7.4 rule that
   // matters here: a page body is untrusted input.
-  const pill = code.ownerDocument.createElement('span');
+  const pill = doc.createElement('span');
   pill.className = 'confluence-inline-placeholder';
   pill.textContent = label === null || label.length === 0 ? 'Confluence content' : label;
   // The id stays reachable on hover: it is what a bug report needs, and what ties
   // the pill to its entry in the fragment cache.
   pill.setAttribute('title', `Preserved Confluence content (${id}). Edit it in Confluence.`);
+  return pill;
+}
 
-  code.replaceWith(pill);
+/**
+ * Replaces a rendered `<code>` sentinel with its pill.
+ *
+ * The Reading View half of FR-4.5. Live Preview draws the *same* pill from the same
+ * builder (`live-preview-placeholders.ts`), which is what D16 means by one sentinel
+ * grammar and two renderers: a reader must not be able to tell which mode they are in
+ * by looking at the placeholder.
+ */
+export function renderInlinePlaceholder(code: HTMLElement, id: string, label: string | null): void {
+  code.replaceWith(inlinePlaceholderPill(code.ownerDocument, id, label));
 }
 
 /** Every inline sentinel in a rendered note, replaced with its pill. */

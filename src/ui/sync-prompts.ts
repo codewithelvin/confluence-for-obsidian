@@ -1,8 +1,8 @@
 import type { App } from 'obsidian';
 import type { LocalPage } from '../sync/pull-planner';
-import type { StructureOp } from '../sync/structure-planner';
+import { describeStructureOp, type StructureOp } from '../sync/structure-planner';
+import { ChangePreviewModal } from './change-preview-modal';
 import { ConfirmModal } from './confirm-modal';
-import { StructurePreviewModal } from './structure-preview-modal';
 
 /**
  * The questions a *sync* has to ask, as modals (spec FR-3.5, FR-7.8).
@@ -48,8 +48,19 @@ export function askAboutStructure(
 ): (ops: readonly StructureOp[]) => Promise<boolean> {
   return (ops) =>
     new Promise((resolve) => {
-      new StructurePreviewModal(app, { ops, spaceKey }, (apply) => {
-        resolve(apply);
-      }).open();
+      new ChangePreviewModal(
+        app,
+        {
+          title: `Apply ${String(ops.length)} change(s) to ${spaceKey}?`,
+          intro:
+            'You moved or renamed these notes in Obsidian. Applying will rename and reparent ' +
+            'the pages in Confluence to match. Nothing is sent until you choose Apply.',
+          lines: ops.map((op) => ({ subject: op.notePath, detail: describeStructureOp(op) })),
+          confirmText: 'Apply in Confluence',
+        },
+        (apply) => {
+          resolve(apply);
+        },
+      ).open();
     });
 }

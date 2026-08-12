@@ -235,6 +235,63 @@ describe('pushing every modified note (FR-5.6, US-4)', () => {
     if (result.ok) return;
     expect(result.error.code).toBe('CREDENTIALS_UNAVAILABLE');
   });
+
+  describe('progress and cancellation (FR-10.6)', () => {
+    beforeEach(async () => {
+      await track('1', 'ENG/One.md', 'Edited.', true);
+      await track('2', 'ENG/Two.md', 'Edited too.', true);
+    });
+
+    it('reports how far along it is, page by page', async () => {
+      const seen: string[] = [];
+
+      await service.pushSubscription(
+        SUBSCRIPTION,
+        {},
+        {
+          onProgress: (done, total) => {
+            seen.push(`${String(done)}/${String(total)}`);
+          },
+        },
+      );
+
+      expect(seen).toEqual(['0/2', '1/2', '2/2']);
+    });
+
+    it('stops before the next page and says it did', async () => {
+      // Checked *before* each page: one more page would be one more edit
+      // published after the user said stop.
+      const result = await service.pushSubscription(
+        SUBSCRIPTION,
+        {},
+        { isCancelled: () => client.updates.length >= 1 },
+      );
+
+      if (!result.ok) throw new Error(result.error.userMessage);
+      expect(client.updates).toHaveLength(1);
+      expect(result.value.cancelled).toBe(true);
+    });
+
+    it('keeps what it already pushed', async () => {
+      const result = await service.pushSubscription(
+        SUBSCRIPTION,
+        {},
+        { isCancelled: () => client.updates.length >= 1 },
+      );
+
+      if (!result.ok) throw new Error(result.error.userMessage);
+      expect(result.value.pushed).toHaveLength(1);
+      // And the index has moved on for it, so a re-run does not push it twice.
+      const pushed = result.value.pushed[0]?.pageId ?? '';
+      expect(state.forSubscription('sub').pages[pushed]?.remoteVersion).toBe(2);
+    });
+
+    it('is not cancelled when nobody asked it to be', async () => {
+      const result = await service.pushSubscription(SUBSCRIPTION);
+
+      expect(result.ok && result.value.cancelled).toBe(false);
+    });
+  });
 });
 
 describe('the questions a push asks (FR-5.7, FR-6.5)', () => {

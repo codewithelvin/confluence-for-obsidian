@@ -14,6 +14,7 @@ import type {
 import type {
   ConfluenceAttachment,
   ConfluenceComment,
+  ConfluenceCommentRef,
   ConfluencePage,
   ConfluencePageRef,
   ConfluencePageVersion,
@@ -186,6 +187,20 @@ export class FakeVaultGateway implements VaultGateway {
       this.folders.has(path) ||
       [...this.files.keys(), ...this.binaries.keys()].some((file) => file.startsWith(`${path}/`))
     );
+  }
+
+  /** Immediate children only, as Obsidian's `TFolder.children` reports them. */
+  folderEntries(path: string): readonly string[] {
+    const prefix = `${path}/`;
+    const children = new Set<string>();
+
+    for (const candidate of [...this.files.keys(), ...this.binaries.keys(), ...this.folders]) {
+      if (!candidate.startsWith(prefix)) continue;
+      const rest = candidate.slice(prefix.length);
+      const cut = rest.indexOf('/');
+      children.add(cut === -1 ? candidate : `${prefix}${rest.slice(0, cut)}`);
+    }
+    return [...children].sort();
   }
 
   readIdentity(path: string): ConfluenceIdentity | null {
@@ -419,6 +434,22 @@ export class FakeConfluence implements ConfluenceGateway {
   listComments(pageId: string): Promise<Result<ConfluenceComment[], AppError>> {
     if (this.commentError !== null) return Promise.resolve(err(this.commentError));
     return Promise.resolve(ok(this.comments.get(pageId) ?? []));
+  }
+
+  /** What the §16 O16 change query answers, and every `since` it was asked about. */
+  changedComments: ConfluenceCommentRef[] = [];
+  changedCommentsError: AppError | null = null;
+  readonly commentQueries: { spaceKey: string; since: string }[] = [];
+
+  listChangedComments(
+    spaceKey: string,
+    since: string,
+  ): Promise<Result<ConfluenceCommentRef[], AppError>> {
+    this.commentQueries.push({ spaceKey, since });
+    if (this.changedCommentsError !== null) {
+      return Promise.resolve(err(this.changedCommentsError));
+    }
+    return Promise.resolve(ok(this.changedComments));
   }
 
   /** Files uploaded by the push path (FR-8.6), in order. */

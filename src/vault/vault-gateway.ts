@@ -11,6 +11,7 @@
 
 import { AppError } from '../util/errors';
 import type { Result } from '../util/result';
+import { MAX_ABSOLUTE_PATH } from './filename-sanitiser';
 import type { ConflictCopy, ConfluenceIdentity } from './frontmatter';
 
 /** A note as the sync engine wants it written: body plus plugin-owned identity. */
@@ -130,6 +131,17 @@ export interface VaultGateway {
 
   exists(path: string): boolean;
 
+  /**
+   * The immediate children of a folder — files and subfolders alike, non-recursive.
+   *
+   * Demotion (§6.5.4) is the only caller and needs exactly this question: a folder
+   * note may be moved out of its folder only when nothing else is in there. `scan`
+   * cannot answer it — it walks recursively and sees Markdown only, so a folder
+   * holding a stray PDF would read as empty and the demotion would strand it in a
+   * folder no page owns.
+   */
+  folderEntries(path: string): readonly string[];
+
   /** The plugin-owned identity in a note's frontmatter, or `null` if it has none. */
   readIdentity(path: string): ConfluenceIdentity | null;
 
@@ -190,6 +202,31 @@ export function outOfMount(path: string): AppError {
   return new AppError(
     'OUT_OF_MOUNT',
     `Refused to touch "${path}": it is outside every configured Confluence mount folder.`,
+  );
+}
+
+/**
+ * The §6.5.3 path budget, enforced at the moment of writing (§6.8 `PATH_TOO_LONG`).
+ *
+ * The path mapper already fits every *note* path inside the budget by truncating the
+ * deepest segment, so this is not the ordinary route to a long path — it is the
+ * backstop for the two cases the mapper cannot fix: an attachment, whose file name is
+ * Confluence's and cannot be shortened without breaking the embed that names it, and
+ * a vault the user moved somewhere deeper after mirroring, which lengthens every path
+ * at once.
+ *
+ * Refusing is better than letting the write fail, because the operating system's own
+ * refusal is `ENAMETOOLONG` against a path nobody can read, with no hint that the
+ * remedy is to move the vault (risk R2).
+ */
+export function pathTooLong(path: string, absoluteLength: number): AppError {
+  return new AppError(
+    'PATH_TOO_LONG',
+    `Refused to write "${path}": its full path would be ${String(absoluteLength)} characters, ` +
+      `past the ${String(MAX_ABSOLUTE_PATH)}-character limit this plugin keeps to stay within ` +
+      "Windows' MAX_PATH. Move the vault closer to the drive root, or enable long paths in " +
+      'Windows and shorten the mount folder name.',
+    { action: 'open-docs' },
   );
 }
 

@@ -65,6 +65,34 @@ export interface PushReport {
   readonly conflicts: readonly ConflictOutcome[];
   /** Unmodified notes. No request was made for any of them (US-4). */
   readonly skipped: number;
+  /**
+   * Whether the user stopped the batch part-way (FR-10.6).
+   *
+   * Reported rather than raised as an error: everything already pushed is pushed,
+   * and calling that a failure would hide work the user can see in Confluence.
+   */
+  readonly cancelled: boolean;
+}
+
+/**
+ * Progress and cancellation for a batch push (spec FR-10.6, §7.1).
+ *
+ * A push of one note needs neither. A push of a whole subscription is the second
+ * genuinely long operation in the plugin, and — unlike a sync — its slowest pages
+ * may do no I/O at all: a page blocked by fidelity or verification is converted and
+ * refused entirely on the main thread, so a subscription full of degraded pages would
+ * run hundreds of conversions in one uninterrupted task.
+ */
+export interface PushProgress {
+  readonly onProgress?: (done: number, total: number) => void;
+  readonly isCancelled?: () => boolean;
+}
+
+/** Hands the main thread back between pages so the UI stays inside the §7.1 budget. */
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 /**
@@ -126,6 +154,7 @@ export class PushService {
   async pushSubscription(
     subscription: Subscription,
     prompts: PushPrompts = {},
+    progress: PushProgress = {},
   ): Promise<Result<PushReport, AppError>> {
     const connection = this.connectionFor(subscription);
     if (connection === null) {
@@ -156,7 +185,7 @@ export class PushService {
       else modified.push(state);
     }
 
-    const report = await this.run(subscription, connection, modified, prompts);
+    const report = await this.run(subscription, connection, modified, prompts, progress);
     return ok({ ...report, skipped });
   }
 
@@ -180,6 +209,7 @@ export class PushService {
     connection: ConnectionProfile,
     pages: readonly PageState[],
     prompts: PushPrompts,
+    progress: PushProgress = {},
   ): Promise<PushReport> {
     const client = this.deps.createClient(connection);
     const push = this.pushDeps(subscription, connection, client);
@@ -190,7 +220,16 @@ export class PushService {
     const conflicts: PageConflict[] = [];
     const states = new Map<string, PageState>();
 
-    for (const state of pages) {
+    let cancelled = false;
+    for (const [index, state] of pages.entries()) {
+      // Checked before the page rather than after: a user who stops the push has
+      // said "no more", and one further page would be one more edit published.
+      if (progress.isCancelled?.() === true) {
+        cancelled = true;
+        break;
+      }
+      progress.onProgress?.(index, pages.length);
+
       const outcome = await this.pushOne(push, subscription, state, prompts);
 
       if (outcome.kind === 'pushed') {
@@ -204,6 +243,10 @@ export class PushService {
       } else {
         blocked.push({ ...named(state), error: outcome.blocked.error });
       }
+
+      // A blocked page does no I/O at all, so without this a subscription of
+      // degraded pages would convert every one of them in a single task (§7.1).
+      await yieldToUi();
     }
 
     const resolved = await this.resolveAll(
@@ -219,7 +262,8 @@ export class PushService {
     }
 
     await this.record(subscription.id, states);
-    return { pushed, blocked, warnings, conflicts: resolved, skipped: 0 };
+    progress.onProgress?.(pages.length, pages.length);
+    return { pushed, blocked, warnings, conflicts: resolved, skipped: 0, cancelled };
   }
 
   /** One page, with the force retry FR-5.7 allows once the user has confirmed it. */

@@ -5,7 +5,7 @@ import { AppError } from '../util/errors';
 import type { Logger } from '../util/logger';
 import { err, ok, type Result } from '../util/result';
 import { buildPathMap, type PathMap } from '../vault/path-mapper';
-import type { VaultGateway } from '../vault/vault-gateway';
+import type { ScannedNote, VaultGateway } from '../vault/vault-gateway';
 import type { BackupStore } from './backup-store';
 import { conflictPhase, type ConflictPhaseResult } from './conflict-phase';
 import { nextSubscriptionState, type AppliedSync } from './sync-persist';
@@ -13,7 +13,7 @@ import { buildSyncReport } from './sync-report';
 import type { FragmentStore } from './fragment-store';
 import { syncLinkIndex, type LinkIndex, type MirroredPage } from './link-index';
 import { classifyOrphans } from './orphans';
-import { discover, preflight } from './sync-discovery';
+import { discover, discoverCommentChanges, preflight } from './sync-discovery';
 import { deletePages, pullPages, relocate, type ExecutorDeps } from './pull-executor';
 import { pullHooks } from './pull-hooks';
 import { buildPullPlan, type PullPlan } from './pull-planner';
@@ -98,25 +98,51 @@ export class SyncEngine {
     if (!local.ok) return err(local.error);
 
     const paths = this.mapPaths(request, remote.value, root.value);
-    const state = this.deps.state.forSubscription(request.subscription.id);
-    const plan = buildPullPlan({ remote: remote.value, local: local.value, state, paths });
-
-    const structure = buildStructurePlan({
-      remote: remote.value,
-      local: local.value,
-      state,
-      mountPath: request.subscription.mountPath,
-      rootPageId: root.value,
-    });
+    const work = await this.decide(request, remote.value, local.value, root.value, paths);
 
     return ok(
       await this.apply(
         request,
-        { plan, structure, scanned: local.value },
+        work,
         syncLinkIndex(request.mirrored ?? [], remote.value, paths),
         callbacks,
       ),
     );
+  }
+
+  /**
+   * Everything the sync decides before it writes anything (§6.6.2 steps 3–4).
+   *
+   * The two plans are built from the same scan and the same index reading, which is
+   * what lets `pullTargets` reconcile them: they must be answering about one moment.
+   */
+  private async decide(
+    request: SyncRequest,
+    remote: readonly ConfluencePageRef[],
+    local: readonly ScannedNote[],
+    rootPageId: string | null,
+    paths: PathMap,
+  ): Promise<SyncWork> {
+    const state = this.deps.state.forSubscription(request.subscription.id);
+    // One request for the whole subscription (§16 O16). Asked after the scan, so a
+    // sync that cannot read the vault fails before spending it.
+    const commentsChanged = await discoverCommentChanges(
+      request,
+      state.lastSyncedAt,
+      this.deps.logger,
+    );
+
+    return {
+      plan: buildPullPlan({ remote, local, state, paths, commentsChanged }),
+      structure: buildStructurePlan({
+        remote,
+        local,
+        state,
+        mountPath: request.subscription.mountPath,
+        rootPageId,
+      }),
+      scanned: local,
+    };
   }
 
   /**

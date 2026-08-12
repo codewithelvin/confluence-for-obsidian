@@ -46,8 +46,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for a page that turns out not to be writable.
 - A push whose body is already byte-identical to the page no longer writes a
   version, so changing only a tag leaves no empty entry in the page's history.
-
-<!-- Note: entries for the read-only sync (M3) and the write path (M5) were never
-     added and are missing above. -->
+- Subscriptions: a space or any page subtree of it mirrors into a mount folder,
+  with a page-count warning before a large first sync.
+- Read-only sync: the full subtree is enumerated each run and only pages whose
+  version moved are fetched, so a re-sync of a thousand pages costs a handful of
+  requests. Moves and renames made in Confluence move the local files with them.
+- Folder-note layout: a page with children is stored as `Page/Page.md`, and the
+  subscription's root page collapses into the mount folder itself.
+- The sync panel: per-subscription status, pending local changes, conflicts,
+  orphans, untracked candidates, conflict copies and errors, with a status-bar
+  item beside it.
+- Attachments are downloaded beside the pages that reference them, skipped over a
+  configurable size limit, and re-fetched only when their remote version moves.
+- The write path: push with four gates — certified page, fragments present,
+  round-trip verification, and a re-read of the remote version immediately before
+  writing — plus a conflict modal offering Keep Local, Keep Remote and Save Both,
+  and a backup before every destructive local write.
+- Force push, off by default, behind a setting and a typed confirmation per use.
+- Structure: create, publish, delete, move and rename, each previewed and
+  confirmed before anything is sent. Deleting a note locally produces an orphan
+  that is reported, never a remote deletion.
+- `Tidy folder notes` performs §6.5.4's bulk demotion on request: folder notes
+  whose page no longer has children move back out of their folders, and one whose
+  folder still holds anything else is reported rather than moved.
+- Inline placeholders now render as a pill in **Live Preview** as well as Reading
+  View, so a mirrored page never shows a reader a raw `{cf:…}` sentinel.
+- A comment added to an otherwise unchanged page now reaches the mirror. One CQL
+  query per subscription per sync names the pages whose comments moved, and they
+  are pulled again; a note with local edits is left alone.
+- A batch push reports progress, hands the UI thread back between pages, and can
+  be stopped with `Stop the push in progress`.
+- A write whose path would exceed the 240-character budget is refused with a typed
+  `PATH_TOO_LONG` error naming the remedy, rather than failing with the operating
+  system's own unreadable error.
 
 [Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/commits/main

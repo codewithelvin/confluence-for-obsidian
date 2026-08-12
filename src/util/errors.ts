@@ -36,7 +36,9 @@ export type ErrorCode =
   | 'MALFORMED_RESPONSE'
   | 'INVALID_BASE_URL'
   | 'CREDENTIALS_UNAVAILABLE'
-  | 'CANCELLED'
+  // Cancellation is deliberately *not* a code. A sync the user stopped still did
+  // most of what it set out to do, and reporting that work as a failure would hide
+  // it; it is a flag on the report (`SyncReport.cancelled`) instead.
   | 'UNKNOWN';
 
 /** A remedy the UI can offer alongside an error. */

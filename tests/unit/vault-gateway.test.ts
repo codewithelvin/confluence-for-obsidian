@@ -191,6 +191,38 @@ describe('writeNote', () => {
     expect(!result.ok && result.error.code).toBe('OUT_OF_MOUNT');
   });
 
+  it('refuses a path over the §6.5.3 budget rather than letting the OS refuse it', async () => {
+    // The path mapper fits every *note* inside the budget already; this is the
+    // backstop for an attachment, whose name is Confluence's and cannot be
+    // shortened, and for a vault moved somewhere deeper after mirroring (risk R2).
+    const result = await gateway.writeBinary(
+      `Confluence/_attachments/1/${'x'.repeat(240)}.png`,
+      new ArrayBuffer(1),
+    );
+
+    expect(!result.ok && result.error.code).toBe('PATH_TOO_LONG');
+    expect(!result.ok && result.error.action).toBe('open-docs');
+  });
+
+  it('still moves a file that is already at an over-long path', async () => {
+    // Refusing here would leave the user unable to tidy up the very file the
+    // budget exists to prevent.
+    const long = `Confluence/${'x'.repeat(240)}.md`;
+    await app.vault.create(long, 'body');
+
+    const result = await gateway.move(long, 'Confluence/short.md');
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses to move a file *to* a path over the budget', async () => {
+    await app.vault.create('Confluence/short.md', 'body');
+
+    const result = await gateway.move('Confluence/short.md', `Confluence/${'y'.repeat(240)}.md`);
+
+    expect(!result.ok && result.error.code).toBe('PATH_TOO_LONG');
+  });
+
   it('reports a failed write instead of throwing', async () => {
     Object.defineProperty(app.vault, 'create', {
       value: () => Promise.reject(new Error('disk full')),

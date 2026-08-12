@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { App } from 'obsidian';
 import { ConnectionModal, type ConnectionDraft } from '../../src/ui/connection-modal';
+import { ChangePreviewModal } from '../../src/ui/change-preview-modal';
 import { ConfirmModal } from '../../src/ui/confirm-modal';
 import { ConnectionsSection } from '../../src/ui/connections-section';
 import { SpaceBrowserModal, filterSpaces } from '../../src/ui/space-browser-modal';
@@ -170,6 +171,73 @@ describe('ConfirmModal', () => {
     click(buttonsOf(modal.contentEl), 'Cancel');
 
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChangePreviewModal (FR-7.8)', () => {
+  const LINES = [
+    { subject: 'EP/Design/Design.md', detail: 'move out of "Design/"' },
+    { subject: 'EP/Ops/Ops.md', detail: 'move out of "Ops/"' },
+  ];
+
+  function open() {
+    const onAnswer = vi.fn<(apply: boolean) => void>();
+    const modal = new ChangePreviewModal(
+      app,
+      { title: 'Tidy 2 folder note(s)?', intro: 'Intro.', lines: LINES, confirmText: 'Tidy them' },
+      onAnswer,
+    );
+    modal.open();
+    return { modal, onAnswer };
+  }
+
+  it('lists every change rather than a count', () => {
+    const { modal } = open();
+    const items = Array.from(modal.contentEl.querySelectorAll('li'));
+
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent).toBe('EP/Design/Design.md — move out of "Design/"');
+  });
+
+  it('writes titles as text, never as markup', () => {
+    const onAnswer = vi.fn<(apply: boolean) => void>();
+    const modal = new ChangePreviewModal(
+      app,
+      {
+        title: 'T',
+        intro: 'I',
+        lines: [{ subject: '<img src=x onerror=alert(1)>', detail: 'move' }],
+        confirmText: 'Go',
+      },
+      onAnswer,
+    );
+    modal.open();
+
+    expect(modal.contentEl.querySelector('img')).toBeNull();
+    expect(modal.contentEl.textContent).toContain('<img src=x onerror=alert(1)>');
+  });
+
+  it('answers yes on the confirm button', () => {
+    const { modal, onAnswer } = open();
+    click(buttonsOf(modal.contentEl), 'Tidy them');
+
+    expect(onAnswer).toHaveBeenCalledWith(true);
+  });
+
+  it('treats dismissal as no', () => {
+    const { modal, onAnswer } = open();
+    modal.close();
+
+    expect(onAnswer).toHaveBeenCalledWith(false);
+  });
+
+  it('answers only once when declined and then closed', () => {
+    const { modal, onAnswer } = open();
+    click(buttonsOf(modal.contentEl), 'Not now');
+    modal.close();
+
+    expect(onAnswer).toHaveBeenCalledOnce();
+    expect(onAnswer).toHaveBeenCalledWith(false);
   });
 });
 

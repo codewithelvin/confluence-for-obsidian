@@ -1,4 +1,4 @@
-import { Notice, Plugin } from 'obsidian';
+import { Notice, Plugin, editorInfoField, editorLivePreviewField } from 'obsidian';
 import type { App, PluginManifest, WorkspaceLeaf } from 'obsidian';
 import { ConfluenceClient } from './api/confluence-client';
 import { ObsidianTransport } from './api/http-transport';
@@ -23,7 +23,9 @@ import { PushService, type PushPrompts } from './sync/push-service';
 import { SuspensionRegistry } from './sync/suspension';
 import { SyncController } from './sync/sync-controller';
 import { SyncStateStore } from './sync/sync-state';
+import { inlinePlaceholderExtension } from './ui/live-preview-placeholders';
 import { orphanActions, type OrphanActions } from './ui/orphan-actions';
+import { PlaceholderLabels } from './ui/placeholder-labels';
 import { askAboutConflicts, pushPrompts } from './ui/push-prompts';
 import { askAboutDeletions, askAboutStructure } from './ui/sync-prompts';
 import { describeConstruct, registerPlaceholderRenderer } from './ui/placeholder-renderer';
@@ -230,6 +232,31 @@ export default class ConfluenceConnectorPlugin extends Plugin {
 
   /** Block widgets and inline pills for preserved content (spec FR-4.5). */
   private registerPlaceholders(): void {
+    const labels = new PlaceholderLabels((sourcePath) => this.labelsFor(sourcePath));
+
+    // The Live Preview half of FR-4.5 (D16). Registered before the Reading View
+    // half only because it needs the cache the two now share.
+    this.registerEditorExtension(
+      inlinePlaceholderExtension({
+        // The view's own file, not the workspace's active one: a split pane editing
+        // a second note must decorate that note's placeholders, not the other's.
+        pathFor: (view) => view.state.field(editorInfoField).file?.path ?? null,
+        isLivePreview: (view) => view.state.field(editorLivePreviewField),
+        labelFor: (notePath, id) => labels.labelFor(notePath, id),
+        ensureLabels: (notePath, onReady) => {
+          labels.ensure(notePath, onReady);
+        },
+      }),
+    );
+
+    // A pull rewrites the note and its fragment sidecar together, so the labels
+    // cached against the old ids have to go with them.
+    this.registerEvent(
+      this.app.metadataCache.on('changed', (file) => {
+        labels.forget(file.path);
+      }),
+    );
+
     registerPlaceholderRenderer({
       register: (language, handler) => {
         this.registerMarkdownCodeBlockProcessor(language, (source, element, context) => {
@@ -242,15 +269,7 @@ export default class ConfluenceConnectorPlugin extends Plugin {
         );
       },
       pageUrlFor: (sourcePath) => this.notes.pageUrlFor(sourcePath),
-      labelsFor: async (sourcePath) => {
-        const fragments = await this.notes.fragmentsFor(sourcePath);
-        return new Map(
-          [...fragments.values()].map((fragment) => [
-            fragment.id,
-            describeConstruct(fragment.name, fragment.type),
-          ]),
-        );
-      },
+      labelsFor: (sourcePath) => this.labelsFor(sourcePath),
       // Straight from the metadata cache: Obsidian has already parsed the note,
       // and re-reading it here would be a second parse of a file it knows.
       headingsFor: (sourcePath) => this.app.metadataCache.getCache(sourcePath)?.headings ?? [],
@@ -258,6 +277,17 @@ export default class ConfluenceConnectorPlugin extends Plugin {
         window.open(url, '_blank');
       },
     });
+  }
+
+  /** What each preserved fragment in a note stands for, keyed by placeholder id. */
+  private async labelsFor(sourcePath: string): Promise<ReadonlyMap<string, string>> {
+    const fragments = await this.notes.fragmentsFor(sourcePath);
+    return new Map(
+      [...fragments.values()].map((fragment) => [
+        fragment.id,
+        describeConstruct(fragment.name, fragment.type),
+      ]),
+    );
   }
 
   private startStatusBar(): void {

@@ -131,6 +131,26 @@
 }
 
 /*
+ * The inline pill (FR-4.5, D16).
+ *
+ * One rule for both renderers: Reading View replaces a `<code>` element with this
+ * span, and Live Preview draws the same span as a CodeMirror widget. It has to read
+ * as *not the user's prose* without breaking the line it sits in, so it is sized
+ * down and tinted rather than boxed.
+ */
+.confluence-inline-placeholder {
+  display: inline;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+  color: var(--text-muted);
+  padding: 0 var(--size-2-2);
+  font-size: var(--font-smaller);
+  white-space: nowrap;
+  cursor: default;
+}
+
+/*
  * A table of contents rebuilt from the note's own headings, in place of the
  * `toc` macro (FR-4.5). Indented by heading level so the shape of the document
  * is visible at a glance, the way Confluence's own contents list shows it.
@@ -219,4 +239,18 @@
 .confluence-conflict-modal,
 .confluence-verification-modal {
   max-width: 46rem;
+}
+
+/*
+ * The change preview shown before any structural change or bulk demotion
+ * (FR-7.8, §6.5.4). Scrolls rather than growing: dragging a folder of forty notes
+ * produces forty lines, and every one of them has to stay reachable.
+ */
+.confluence-structure-preview {
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: var(--size-4-2) 0;
+  padding-left: var(--size-4-4);
+  font-size: var(--font-ui-smaller);
+  word-break: break-word;
 }

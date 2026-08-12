@@ -3,6 +3,7 @@ import { ok, type Result } from '../util/result';
 import { meetsMinimumVersion, type SemanticVersion } from '../util/version';
 import {
   parseComment,
+  parseCommentRef,
   parsePage,
   parsePageRef,
   parsePaged,
@@ -13,13 +14,14 @@ import {
   parseUser,
   type ConfluenceAttachment,
   type ConfluenceComment,
+  type ConfluenceCommentRef,
   type ConfluencePage,
   type ConfluencePageRef,
   type ConfluencePageVersion,
   type ConfluenceSpace,
   type ConfluenceUser,
 } from './api-types';
-import { subtreeCql } from './cql';
+import { COMMENT_WINDOW_HOURS, commentsChangedCql, cqlDateTime, subtreeCql } from './cql';
 import { ENDPOINTS } from './endpoints';
 import type { CollectOptions } from './pagination';
 import { RequestRunner, type RequestDeps, type TokenProvider } from './request-runner';
@@ -104,6 +106,11 @@ export interface ConfluenceGateway {
     bytes: ArrayBuffer,
   ): Promise<Result<ConfluenceAttachment, AppError>>;
   listComments(pageId: string): Promise<Result<ConfluenceComment[], AppError>>;
+  /** Which pages in a space have had a comment change since a moment (§16 O16). */
+  listChangedComments(
+    spaceKey: string,
+    since: string,
+  ): Promise<Result<ConfluenceCommentRef[], AppError>>;
   addLabels(pageId: string, labels: readonly string[]): Promise<Result<void, AppError>>;
   removeLabel(pageId: string, label: string): Promise<Result<void, AppError>>;
   updatePage(update: PageUpdate): Promise<Result<ConfluencePageVersion, AppError>>;
@@ -235,6 +242,37 @@ export class ConfluenceClient implements ConfluenceGateway {
         expand: 'body.storage,history,version,extensions.inlineProperties',
       },
       parseComment,
+    );
+  }
+
+  /**
+   * Pages whose comments moved since `since` — one request per sync (§16 O16).
+   *
+   * FR-9.4 regenerates the comments region as part of writing a page's body, and a
+   * sync fetches a body only where the version moved (FR-3.3). So a colleague who
+   * comments without editing changes nothing the sync looks at, and the remark never
+   * reaches the mirror. This query is what makes them visible: it names the pages,
+   * and the ordinary pull does the rest.
+   *
+   * No bodies are expanded. `container` is what identifies the page and `version`
+   * is what lets the caller discard the extra results the §6.2's date margin brings
+   * back; both together are a fraction of one comment's text.
+   */
+  async listChangedComments(
+    spaceKey: string,
+    since: string,
+    options: CollectOptions = {},
+  ): Promise<Result<ConfluenceCommentRef[], AppError>> {
+    const from = cqlDateTime(since, COMMENT_WINDOW_HOURS);
+    // An index with an unreadable timestamp is not worth failing a sync over; the
+    // mirror simply behaves as it did before this query existed.
+    if (from === null) return ok([]);
+
+    return this.runner.collect(
+      ENDPOINTS.contentSearch,
+      { cql: commentsChangedCql(spaceKey, from), expand: 'container,version' },
+      parseCommentRef,
+      options,
     );
   }
 

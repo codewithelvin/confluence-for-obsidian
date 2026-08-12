@@ -15,6 +15,7 @@ interface ObsidianDomExtensions {
   empty(): void;
   setText(text: string): void;
   addClass(...classes: string[]): void;
+  appendText(text: string): void;
   createEl(tag: string, options?: { text?: string; cls?: string }): HTMLElement;
   createDiv(options?: { text?: string; cls?: string }): HTMLElement;
   createSpan(options?: { text?: string; cls?: string }): HTMLElement;
@@ -33,6 +34,11 @@ function augmentDom(): void {
   };
   proto['addClass'] = function (this: HTMLElement, ...classes: string[]): void {
     this.classList.add(...classes);
+  };
+  // A text node, never markup — which is exactly why the plugin uses it for page
+  // titles beside an element (§7.4).
+  proto['appendText'] = function (this: HTMLElement, text: string): void {
+    this.appendChild(this.ownerDocument.createTextNode(text));
   };
   proto['createEl'] = function (
     this: HTMLElement,
@@ -168,11 +174,16 @@ export class Plugin {
   readonly views = new Map<string, unknown>();
   readonly codeBlockProcessors = new Map<string, unknown>();
   readonly postProcessors: unknown[] = [];
+  readonly editorExtensions: unknown[] = [];
   readonly statusBarItems: HTMLElement[] = [];
 
   registerEvent(): void {}
   registerInterval(): void {}
   registerDomEvent(): void {}
+
+  registerEditorExtension(extension: unknown): void {
+    this.editorExtensions.push(extension);
+  }
 
   registerView(type: string, factory: unknown): void {
     this.views.set(type, factory);
@@ -406,6 +417,15 @@ export class Notice {
 }
 
 export class Modal {
+  /**
+   * Every modal opened since the last reset.
+   *
+   * A command that raises its own modal owns the instance, so this is the only way
+   * a test can answer one — which is the point: the answer is what the command
+   * does next.
+   */
+  static readonly opened: Modal[] = [];
+
   readonly containerEl: HTMLElement;
   readonly titleEl: HTMLElement;
   readonly contentEl: HTMLElement;
@@ -417,8 +437,13 @@ export class Modal {
     this.contentEl = this.containerEl.appendChild(document.createElement('div'));
   }
 
+  static reset(): void {
+    Modal.opened.length = 0;
+  }
+
   open(): void {
     this.isOpen = true;
+    Modal.opened.push(this);
     this.onOpen();
   }
 
@@ -454,6 +479,16 @@ export function resetRequestUrlHandler(): void {
 export function requestUrl(param: unknown): Promise<FakeRequestUrlResponse> {
   return requestUrlHandler(param);
 }
+
+/**
+ * The CodeMirror state fields Obsidian exposes to editor extensions.
+ *
+ * Present only so `main.ts` resolves; nothing in these tests builds an `EditorView`,
+ * and the decoration logic they feed is tested through its own pure entry point
+ * (`pillRanges`) instead.
+ */
+export const editorInfoField = Symbol('editorInfoField');
+export const editorLivePreviewField = Symbol('editorLivePreviewField');
 
 export function normalizePath(path: string): string {
   return path

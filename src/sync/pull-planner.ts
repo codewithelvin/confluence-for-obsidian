@@ -87,6 +87,18 @@ export interface PlanInput {
   readonly local: readonly ScannedNote[];
   readonly state: SubscriptionState;
   readonly paths: PathMap;
+  /**
+   * Pages whose comments changed since the last sync (§16 O16).
+   *
+   * Their bodies have not moved, so nothing else in this plan would look at them —
+   * but FR-9.4 rebuilds the comments region as part of writing a body, so the only
+   * way to show a new remark is to pull the page again.
+   *
+   * Absent on a first sync and whenever the subscription has comments switched off
+   * (FR-9.5), which is why it is optional rather than an empty set the caller has to
+   * remember to pass.
+   */
+  readonly commentsChanged?: ReadonlySet<string>;
 }
 
 /**
@@ -151,6 +163,7 @@ function classifyTracked(
   mapped: MappedPage,
   scanned: ScannedNote | undefined,
   buckets: Buckets,
+  commentsChanged: boolean,
 ): boolean {
   if (scanned === undefined) {
     buckets.orphans.push(toLocalPage(page, previous.localPath));
@@ -160,6 +173,9 @@ function classifyTracked(
   const remoteChanged = page.version !== previous.remoteVersion;
   const locallyChanged = scanned.hash !== previous.localHash;
 
+  // A new comment is deliberately *not* part of this test. FR-6.1 defines a conflict
+  // as a local edit against a moved remote version, and a colleague's remark moves no
+  // version — treating it as one would interrupt the user to resolve nothing.
   if (remoteChanged && locallyChanged) {
     buckets.conflicts.push(toLocalPage(page, scanned.path));
     return false;
@@ -177,22 +193,33 @@ function classifyTracked(
   }
 
   if (remoteChanged) {
-    buckets.pull.push({
-      page,
-      path: mapped.notePath,
-      isFolderNote: mapped.folderPath !== null,
-      isNew: false,
-      alias: mapped.aliasTitle,
-      previousAlias: previous.alias,
-      previousLabels: previous.labels,
-    });
+    buckets.pull.push(pullOf(page, previous, mapped));
     return false;
   }
   if (locallyChanged) {
     buckets.localEdits.push(toLocalPage(page, scanned.path));
     return false;
   }
+  // Last, and only when the note is untouched: a pull rewrites the body, and doing
+  // that to a note the user has edited would discard their work to show a remark.
+  if (commentsChanged) {
+    buckets.pull.push(pullOf(page, previous, mapped));
+    return false;
+  }
   return moves.length === 0;
+}
+
+/** A pull of a page already in the index — the same item whatever prompted it. */
+function pullOf(page: ConfluencePageRef, previous: PageState, mapped: MappedPage): PullItem {
+  return {
+    page,
+    path: mapped.notePath,
+    isFolderNote: mapped.folderPath !== null,
+    isNew: false,
+    alias: mapped.aliasTitle,
+    previousAlias: previous.alias,
+    previousLabels: previous.labels,
+  };
 }
 
 /** Markdown files in the mount that no tracked or incoming page accounts for. */
@@ -245,7 +272,10 @@ export function buildPullPlan(input: PlanInput): PullPlan {
       });
       continue;
     }
-    if (classifyTracked(page, previous, mapped, scanned.get(page.id), buckets)) unchanged += 1;
+    const withNewComments = input.commentsChanged?.has(page.id) ?? false;
+    if (classifyTracked(page, previous, mapped, scanned.get(page.id), buckets, withNewComments)) {
+      unchanged += 1;
+    }
   }
 
   const forget: string[] = [];
