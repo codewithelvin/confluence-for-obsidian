@@ -22,7 +22,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "install:test": "node scripts/install-test-vault.mjs",
-    "verify": "npm run typecheck && npm run lint && npm run lint:boundaries && npm run format:check && npm run test",
+    "verify": "npm run typecheck && npm run lint && npm run lint:boundaries && npm run format:check && npm run test:coverage",
     "version": "node version-bump.mjs && git add manifest.json versions.json",
     "test:bless": "node scripts/bless-fixtures.mjs",
     "survey": "node scripts/survey-mirror.mjs"

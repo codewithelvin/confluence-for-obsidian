@@ -1,9 +1,14 @@
 name: Release
 
+# Semver tags only, with no `v` prefix — the form Obsidian's community plugin
+# process expects, because it matches the tag against `manifest.json`'s own
+# `version`. The previous pattern was `*`, which meant any tag at all published a
+# release: a `wip` or `before-refactor` tag would have shipped one.
 on:
   push:
     tags:
-      - '*'
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
 
 permissions:
   contents: write
@@ -19,6 +24,29 @@ jobs:
           node-version: '24'
           cache: npm
 
+      # Before anything is built, let alone published. Tagging `1.0.0` while
+      # `manifest.json` still says `0.0.1` is the standard way an Obsidian plugin
+      # release goes wrong: the release looks fine, and every installer then reads a
+      # version that disagrees with the one it downloaded. `npm version <x.y.z>`
+      # updates both files and stages them, which is why the remedy names it.
+      - name: Check the tag against manifest.json and versions.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          manifest=$(node -p "require('./manifest.json').version")
+          if [ "$manifest" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match manifest.json version $manifest. Run 'npm version $TAG', push the commit, then tag it."
+            exit 1
+          fi
+
+          minimum=$(node -p "require('./versions.json')['$TAG'] ?? ''")
+          if [ -z "$minimum" ]; then
+            echo "::error::versions.json has no entry for $TAG. Run 'npm version $TAG', which adds it."
+            exit 1
+          fi
+
+          echo "$TAG matches manifest.json, and needs Obsidian $minimum or newer."
+
       - name: Install
         run: npm ci
 
@@ -28,12 +56,72 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Create release
+      # Two forms, because two kinds of installer want different things. The three
+      # loose files are what Obsidian's community catalogue and BRAT fetch, by name,
+      # directly from the release. The zip is for a person following the README by
+      # hand: it already holds the `confluence-dc-connector/` folder, so it unzips
+      # straight into `.obsidian/plugins/` with the right folder name and no chance
+      # of getting that wrong.
+      - name: Package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p "package/confluence-dc-connector"
+          cp main.js manifest.json styles.css "package/confluence-dc-connector/"
+          (cd package && zip -r "../confluence-dc-connector-$TAG.zip" "confluence-dc-connector")
+
+      # The changelog is the honest source when it has a section for this version;
+      # generated notes are the fallback while everything still sits under
+      # [Unreleased]. Never both, and never a silent empty body.
+      #
+      # Matched with `index`, not a regex: `## [1.2.3]` through a regex needs the
+      # brackets escaped through both the shell and awk, and getting that a shade
+      # wrong turns `[Unreleased]` into a *character class* that matches nothing —
+      # which is exactly what the first version of this step did, silently.
+      - name: Collect release notes
+        id: notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          awk -v tag="$TAG" '
+              index($0, "## [" tag "]") == 1 { found = 1; next }
+              found && index($0, "## ") == 1 { exit }
+              found { print }
+            ' CHANGELOG.md > release-notes.md
+
+          if grep -q '[^[:space:]]' release-notes.md; then
+            echo "Using the CHANGELOG.md section for $TAG."
+            echo "source=CHANGELOG.md" >> "$GITHUB_OUTPUT"
+          else
+            echo "CHANGELOG.md has no section for $TAG; generating notes from commits."
+            echo "source=generated" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create the release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          NOTES_SOURCE: ${{ steps.notes.outputs.source }}
         run: |
+          # A prerelease while the version is still 0.x: the README calls this a beta
+          # and a release badge saying otherwise would contradict it.
+          case "$TAG" in
+            0.*|*-*) prerelease="--prerelease" ;;
+            *) prerelease="" ;;
+          esac
+
+          if [ "$NOTES_SOURCE" = "CHANGELOG.md" ]; then
+            notes="--notes-file release-notes.md"
+          else
+            notes="--generate-notes"
+          fi
+
+          # shellcheck disable=SC2086
           gh release create "$TAG" \
             --title "$TAG" \
-            --generate-notes \
-            main.js manifest.json styles.css
+            $notes \
+            $prerelease \
+            main.js \
+            manifest.json \
+            styles.css \
+            "confluence-dc-connector-$TAG.zip"

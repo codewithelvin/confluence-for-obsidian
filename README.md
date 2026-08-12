@@ -99,35 +99,55 @@ Allow about ten minutes for the whole thing.
 
 ### Step 1 — install the plugin
 
-The plugin is not in Obsidian's community catalogue yet, so you install it by hand. It is
-three files in a folder.
+The plugin is not in Obsidian's community catalogue yet, so you install it from its
+[releases page](https://github.com/codewithelvin/confluence-for-obsidian/releases). Pick
+either way below.
 
-1. Go to the [releases page](https://github.com/codewithelvin/confluence-for-obsidian/releases)
-   and download these three files from the newest release:
-   - `main.js`
-   - `manifest.json`
-   - `styles.css`
+#### Option A — the zip (simplest)
+
+1. From the newest release, download **`confluence-dc-connector-<version>.zip`**.
 
 2. Find your vault's folder on disk. In Obsidian: **Settings → About → Advanced**, or
    right-click any file → **Show in system explorer**.
 
-3. Inside your vault, create this folder path if it does not exist:
-
-   ```
-   <your vault>/.obsidian/plugins/confluence-dc-connector/
-   ```
+3. Open the `.obsidian/plugins/` folder inside your vault, creating `plugins` if it is not
+   there.
 
    > `.obsidian` starts with a dot, which means your file manager may be hiding it. On
    > Windows, tick **Hidden items** in File Explorer's View tab. On macOS, press
    > <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>.</kbd> in Finder.
 
-4. Put the three downloaded files **directly inside** that folder — not in a sub-folder.
+4. Unzip the download **into** `plugins/`. The zip already contains a
+   `confluence-dc-connector/` folder, so you end up with
+   `.obsidian/plugins/confluence-dc-connector/` holding three files. Do not rename that
+   folder — Obsidian identifies the plugin by it.
 
-5. Back in Obsidian, open **Settings → Community plugins**. If it says restricted mode is
-   on, turn it off. Then click the reload icon next to **Installed plugins**, find
+5. Back in Obsidian, open **Settings → Community plugins**. If restricted mode is on, turn it
+   off. Then click the reload icon next to **Installed plugins**, find
    **Confluence 4 Obsidian**, and switch it on.
 
-You should now see **Confluence 4 Obsidian** in the left-hand list of your settings window.
+#### Option B — BRAT (updates itself)
+
+If you expect to follow updates during the beta, this saves you repeating Option A every
+time.
+
+1. Install the community plugin **BRAT** (Beta Reviewers Auto-update Tool) the normal way,
+   from **Settings → Community plugins → Browse**.
+2. Run the command **BRAT: Add a beta plugin for testing**.
+3. Paste `codewithelvin/confluence-for-obsidian` and confirm, ticking the option to enable it
+   after installing.
+
+BRAT then checks for new releases and updates the plugin for you. Because this is still a
+`0.x` beta, its releases are marked as prereleases — so turn on BRAT's prerelease setting
+(**Enable beta plugin updates**) or it will not see them.
+
+Either way you should end up with **Confluence 4 Obsidian** in the left-hand list of your
+settings window.
+
+> **Prefer to place the files yourself?** Every release also carries `main.js`,
+> `manifest.json` and `styles.css` as separate downloads — that is the form BRAT and
+> Obsidian's own catalogue fetch. Drop those three into
+> `.obsidian/plugins/confluence-dc-connector/` instead of using the zip.
 
 ### Step 2 — get a token from Confluence
 
@@ -647,13 +667,39 @@ Honest list, so nothing surprises you later:
 ```bash
 npm install
 npm run dev       # watch build
-npm run verify    # typecheck + lint + layer boundaries + format + tests
+npm run verify    # typecheck + lint + layer boundaries + format + tests with coverage
 npm run build     # production bundle
 npm run install:test   # copy the build into the local test vault
 ```
 
 The test suite is 1 656 tests across 60 files, at 96.9% line and 91.8% branch coverage.
-`npm run verify` must be green before anything is called done.
+`npm run verify` must be green before anything is called done — it is also the entirety of
+what CI runs, so a green local run and a green build cannot disagree.
+
+### Cutting a release
+
+Releases are built by GitHub Actions. You never upload a file by hand.
+
+```bash
+npm version 0.1.0     # updates manifest.json and versions.json, commits, tags
+git push origin main --follow-tags
+```
+
+Pushing the tag runs `.github/workflows/release.yml`, which verifies, builds, and publishes a
+release carrying `main.js`, `manifest.json`, `styles.css` and a ready-to-unzip
+`confluence-dc-connector-<version>.zip`.
+
+Two guards run **before** anything is built, because both failures are invisible until a user
+hits them:
+
+- the tag must equal `manifest.json`'s `version` — tagging `1.0.0` while the manifest says
+  `0.0.1` publishes a release every installer reads as the wrong version;
+- `versions.json` must have an entry for it, which is how Obsidian decides whether an older
+  app version may install this build.
+
+`npm version` sets both, which is why it is the documented route. Only semver tags trigger the
+workflow, so a `wip` or `before-refactor` tag is ignored; a `0.x` or prerelease tag is
+published as a **prerelease**, which is what BRAT's beta setting looks for.
 
 ### Architecture rules
 

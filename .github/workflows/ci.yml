@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+# `npm run verify` is the whole gate, deliberately, rather than the same list of
+# steps spelled out again here. Enumerating them gave prettier logs and cost the
+# layer-boundary check: `lint:boundaries` was in `verify` and never made it into
+# this file, so for the whole of M0-M7 the architecture rules were enforced on
+# developer machines and not in CI. One command cannot drift from itself.
+#
+# `verify` runs the tests *with coverage*, so the §8.1 thresholds in
+# vitest.config.ts are part of it — a drop below them fails the build.
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -20,20 +29,17 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Type check
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Format check
-        run: npm run format:check
-
-      - name: Test with coverage
-        run: npm run test:coverage
+      - name: Verify
+        run: npm run verify
 
       - name: Build
         run: npm run build
 
-      - name: Confirm build output exists
-        run: test -f main.js
+      - name: Confirm the plugin's three files exist
+        # The exact set Obsidian loads. A build that silently stopped emitting one
+        # of them would otherwise only be found by a user whose install is broken.
+        run: |
+          for file in main.js manifest.json styles.css; do
+            test -s "$file" || { echo "::error::$file is missing or empty after build"; exit 1; }
+          done
+          echo "main.js is $(wc -c < main.js) bytes."
