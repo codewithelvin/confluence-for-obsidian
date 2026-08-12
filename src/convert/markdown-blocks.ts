@@ -171,11 +171,19 @@ function blockquoteToStorage(node: Blockquote, ctx: ReverseContext): string {
  * that, every step-with-sub-steps in a specification page reproduced as
  * `<li>Step<ul>…` against an original of `<li><p>Step</p><ul>…`, and the page
  * went read-only over a wrapper nobody can see.
+ *
+ * A **block carrier is read before the wrapper is dropped**, because dropping it
+ * hands the children to `phrasing`, which has no reading for that marker. A macro
+ * that was a direct child of the `<li>` (§6.4.8, §6.4.12) arrives here as exactly
+ * the shape it arrives as at body level — a lone paragraph holding an embed and its
+ * marker — so it has to be read the same way. Left to `phrasing`, a `drawio` macro
+ * came back as an `ac:image` plus a literal HTML comment and an `include` as the
+ * note's own text, and the page failed certification over both.
  */
 function listItemContent(item: ListItem, ctx: ReverseContext): string {
   const [first] = item.children;
   if (item.children.length === 1 && first?.type === 'paragraph') {
-    return ctx.phrasing(first.children);
+    return carriedBlockMacro(first.children, ctx) ?? ctx.phrasing(first.children);
   }
   return ctx.blocks(item.children);
 }

@@ -269,3 +269,40 @@ describe('the URL form', () => {
     expect(attachmentUrl('EP/_attachments/1/x.png').startsWith('EP/')).toBe(true);
   });
 });
+
+describe('a table refused after its media was hidden leaves nothing behind', () => {
+  /** Which fragment ids the note actually points at. */
+  function allocated(storage: string): { readonly held: string[]; readonly used: string[] } {
+    const result = storageToMarkdown(storage, OPTIONS);
+    if (!result.ok) throw new Error(result.error.userMessage);
+
+    const held = [...result.value.fragments.keys()];
+    return { held, used: held.filter((id) => result.value.markdown.includes(id)) };
+  }
+
+  it('rolls the image back when a macro is still in the table', () => {
+    // The gate order is deliberate — media is hidden before the namespaced check, so
+    // an image cannot be what refuses the table. But two gates still refuse *after*
+    // it, and the ids taken for the images would otherwise stay in the sidecar
+    // pointed at by nothing, with the table's own id past them.
+    const macro = '<ac:structured-macro ac:name="jira"/>';
+    const { held, used } = allocated(preservedTable(`${BUTTON}${macro}`));
+
+    expect(held).toEqual(used);
+    expect(held).toEqual(['cfb-0001']);
+  });
+
+  it('and when a blank line inside a <pre> makes the table unsplittable', () => {
+    const { held, used } = allocated(preservedTable(`${BUTTON}<pre>one\n\ntwo</pre>`));
+
+    expect(held).toEqual(used);
+    expect(held).toEqual(['cfb-0001']);
+  });
+
+  it('while a table that keeps its projection keeps its ids', () => {
+    const { held, used } = allocated(preservedTable(BUTTON));
+
+    expect(held).toEqual(used);
+    expect(held).toEqual(['cfb-0001']);
+  });
+});

@@ -40,13 +40,17 @@ export interface FragmentInput {
   readonly label: string;
 }
 
+function idFor(counter: number): string {
+  return `${ID_PREFIX}${String(counter).padStart(ID_DIGITS, '0')}`;
+}
+
 export class PlaceholderRegistry {
   private readonly fragments = new Map<string, Fragment>();
   private counter = 0;
 
   add(input: FragmentInput): Fragment {
     this.counter += 1;
-    const id = `${ID_PREFIX}${String(this.counter).padStart(ID_DIGITS, '0')}`;
+    const id = idFor(this.counter);
 
     const fragment: Fragment = {
       id,
@@ -63,6 +67,33 @@ export class PlaceholderRegistry {
 
   snapshot(): FragmentMap {
     return new Map(this.fragments);
+  }
+
+  /**
+   * Where the registry stands, for a caller that has to allocate before it can know
+   * whether it will keep the result.
+   */
+  mark(): number {
+    return this.counter;
+  }
+
+  /**
+   * Discards everything added since `mark`, counter included.
+   *
+   * `tableAsHtml` is why this exists: it has to replace a table's images *before* it
+   * can ask whether anything namespaced is left, and two of its gates still refuse
+   * afterwards. Without a rollback those replacements stayed in the sidecar
+   * unreferenced by any note, and every later placeholder on the page moved up a
+   * number — deterministic, but so is being wrong the same way every time.
+   *
+   * The counter goes back too, which is what keeps §6.4.3's promise: ids read down
+   * the page in document order, with no gap where a refused projection used to be.
+   */
+  rollbackTo(mark: number): void {
+    for (let counter = mark + 1; counter <= this.counter; counter += 1) {
+      this.fragments.delete(idFor(counter));
+    }
+    this.counter = mark;
   }
 
   get size(): number {

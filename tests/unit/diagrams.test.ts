@@ -257,3 +257,20 @@ describe('a placeholder label (FR-4.14)', () => {
     expect(labelOf(excerpt)).toBe('label: excerpt macro — The summary.');
   });
 });
+
+describe('a diagram macro that is a bullet, and nothing else in it (§6.4.8)', () => {
+  const storage = `<ul><li>${drawio('Cancel')}</li></ul>`;
+
+  it('shows the diagram inside the item', () => {
+    expect(convert(storage)).toBe(`- ![[${MOUNT}/Cancel.png]]<!--cf-drawio:cfb-0001-->`);
+  });
+
+  it('gives the macro back, and certifies', () => {
+    // Read as phrasing — which is what dropping the paragraph wrapper does — the
+    // marker means nothing and the embed is an ordinary image: the macro came back
+    // as `<ac:image>` plus a literal comment, so a forced push would have replaced
+    // a diagram with a picture of it and lost the drawing.
+    expect(push(convert(storage), storage)).toBe(storage);
+    expect(certified(storage)).toBe(true);
+  });
+});

@@ -345,7 +345,24 @@ const NAMESPACED = 'table containing Confluence macros, images or links';
 /** A blank line the projection may not remove, so the table cannot be one block. */
 const UNSPLITTABLE = 'table containing preformatted text broken by a blank line';
 
+/**
+ * The projection, or nothing allocated.
+ *
+ * `hideTableMediaIn` takes a fragment id per image it replaces, and two gates below
+ * it still refuse the table afterwards — a macro left over, or a blank line that
+ * cannot be removed. A refusal therefore has to give those ids back, or a table that
+ * ended up a placeholder would leave its images in the sidecar with nothing pointing
+ * at them and push the table's own id up past them. `planReplacements` makes the same
+ * argument inside itself; this is that argument one level out.
+ */
 function tableAsHtml(table: Element, ctx: ConversionContext): Projection {
+  const mark = ctx.placeholders.mark();
+  const projection = projectTable(table, ctx);
+  if (!('node' in projection)) ctx.placeholders.rollbackTo(mark);
+  return projection;
+}
+
+function projectTable(table: Element, ctx: ConversionContext): Projection {
   const projected = table.cloneNode(true) as Element;
   if (!hideCommentAnchorsIn(projected)) return { reason: NAMESPACED };
   // Before the namespaced check, not after: an emoticon is namespaced markup that
