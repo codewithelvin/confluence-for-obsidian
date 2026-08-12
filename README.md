@@ -701,6 +701,32 @@ hits them:
 workflow, so a `wip` or `before-refactor` tag is ignored; a `0.x` or prerelease tag is
 published as a **prerelease**, which is what BRAT's beta setting looks for.
 
+### Three dependencies are pinned exactly, on purpose
+
+`obsidian`, `@codemirror/state` and `@codemirror/view` carry exact versions rather than
+carets, and they have to move together:
+
+```json
+"obsidian": "1.13.1",
+"@codemirror/state": "6.5.0",
+"@codemirror/view": "6.38.6"
+```
+
+All three are **types-only** — every one of them is in the esbuild `external` list, so none of
+them is in `main.js`. Obsidian supplies the real implementations at runtime, and the
+`obsidian` package declares _which_ CodeMirror it ships as an **exact** peer dependency. So
+the installed version has one job: be the types for the CodeMirror your users are actually
+running. A caret defeats that — `^6.5.0` resolves to the newest 6.x, and you end up
+type-checking against APIs that may not exist in the app.
+
+Left on carets it also broke the build outright: `npm ci` refuses an unmet exact peer
+dependency, so from M2 to M7 every CI run failed at **Install** and never reached the tests.
+
+To move them, bump all three to a matching set — read the new `obsidian` release's peer
+dependencies and copy the versions from there — then run `npm run verify`. Do not run
+`npm update` on them, and do not reach for `--legacy-peer-deps`: it silences exactly the
+signal that tells you the set has drifted.
+
 ### Architecture rules
 
 Enforced by ESLint — a violation fails the build:
