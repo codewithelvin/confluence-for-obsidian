@@ -19,7 +19,7 @@ import { App as FakeApp, Notice, Plugin as FakePlugin, TFile } from '../fakes/ob
 
 const MANIFEST = {
   id: 'confluence-dc-connector',
-  name: 'Confluence 4 Obsidian',
+  name: 'Confluence DC Connector',
   version: '0.0.1',
   minAppVersion: '1.5.3',
   description: 'test',

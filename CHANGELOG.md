@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-08-12
+
+### Changed
+
+- Renamed to **Confluence DC Connector**. Obsidian's plugin directory does not
+  accept a name containing "Obsidian", so the previous name could not be
+  submitted at all. The plugin **id is unchanged**, so an existing installation
+  keeps its settings, its token and its mirror — nothing needs re-pulling.
+
 ## [0.0.1] - 2026-08-12
 
 First public build, released as a prerelease: every milestone is present, and the
@@ -102,5 +111,6 @@ in one space. Treat it as a beta until a second server has confirmed them.
 - An `include` macro becomes an embed of the note it names, so the included page's
   content is visible in place, as it is in Confluence.
 
-[Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/compare/0.0.1...main
+[Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/compare/0.0.2...main
+[0.0.2]: https://github.com/codewithelvin/confluence-for-obsidian/releases/tag/0.0.2
 [0.0.1]: https://github.com/codewithelvin/confluence-for-obsidian/releases/tag/0.0.1

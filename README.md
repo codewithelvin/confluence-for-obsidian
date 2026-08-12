@@ -1,4 +1,4 @@
-# Confluence 4 Obsidian
+# Confluence DC Connector
 
 **Read and edit your company's Confluence pages in Obsidian.**
 
@@ -124,7 +124,7 @@ either way below.
 
 5. Back in Obsidian, open **Settings → Community plugins**. If restricted mode is on, turn it
    off. Then click the reload icon next to **Installed plugins**, find
-   **Confluence 4 Obsidian**, and switch it on.
+   **Confluence DC Connector**, and switch it on.
 
 #### Option B — BRAT (updates itself)
 
@@ -141,7 +141,7 @@ BRAT then checks for new releases and updates the plugin for you. Because this i
 `0.x` beta, its releases are marked as prereleases — so turn on BRAT's prerelease setting
 (**Enable beta plugin updates**) or it will not see them.
 
-Either way you should end up with **Confluence 4 Obsidian** in the left-hand list of your
+Either way you should end up with **Confluence DC Connector** in the left-hand list of your
 settings window.
 
 > **Prefer to place the files yourself?** Every release also carries `main.js`,
@@ -173,7 +173,7 @@ edit a page in your browser, the plugin cannot either.
 
 ### Step 3 — connect Obsidian to your site
 
-1. In Obsidian, open **Settings → Confluence 4 Obsidian**.
+1. In Obsidian, open **Settings → Confluence DC Connector**.
 2. Under **Connections**, click **Add connection**.
 3. Fill in three fields:
 
@@ -208,7 +208,7 @@ again after a restart. It never falls back to storing it unencrypted.
 A **subscription** is one instruction: _mirror this space (or this page and its children)
 into this folder._
 
-1. Still in **Settings → Confluence 4 Obsidian**, under **Subscriptions**, click **Add
+1. Still in **Settings → Confluence DC Connector**, under **Subscriptions**, click **Add
    subscription**.
 2. **Connection** — pick the one you just made.
 3. **Space** — click **Choose space** and pick from the list. This is fetched live from
@@ -518,7 +518,7 @@ of the name. None of these have a keyboard shortcut by default; assign your own 
 
 ## Settings
 
-**Settings → Confluence 4 Obsidian.**
+**Settings → Confluence DC Connector.**
 
 ### Connections
 

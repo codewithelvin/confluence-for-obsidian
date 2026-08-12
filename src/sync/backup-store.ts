@@ -95,7 +95,7 @@ export class BackupStore {
       name,
       // A header rather than bare content: a folder of flattened names is hard to
       // read, and the one thing a recovering user needs is which note this was.
-      `<!-- Backup of ${notePath}, taken ${takenAt} by Confluence 4 Obsidian -->\n${content}`,
+      `<!-- Backup of ${notePath}, taken ${takenAt} by Confluence DC Connector -->\n${content}`,
     );
     if (!written.ok) return written;
 

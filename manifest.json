@@ -1,7 +1,7 @@
 {
   "id": "confluence-dc-connector",
-  "name": "Confluence 4 Obsidian",
-  "version": "0.0.1",
+  "name": "Confluence DC Connector",
+  "version": "0.0.2",
   "minAppVersion": "1.5.3",
   "description": "Mirror Confluence Data Center pages into your vault as Markdown, edit them locally, and push your changes back.",
   "author": "Elvin Huseynov",
