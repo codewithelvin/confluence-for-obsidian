@@ -4,6 +4,7 @@ import { sha256 } from '../util/hash';
 import type { Logger } from '../util/logger';
 import { pageUrl, type ConfluenceIdentity } from '../vault/frontmatter';
 import { parentPath, type VaultGateway } from '../vault/vault-gateway';
+import { baseName } from './structure-rules';
 import type { StructureOp } from './structure-planner';
 import type { PageState } from './sync-state';
 import type { SyncFailure } from './sync-types';
@@ -79,6 +80,51 @@ async function sendChange(
   };
 }
 
+/** A folder rename as it is about to be carried out. */
+interface FolderRename {
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * Where this page's note is **now**.
+ *
+ * `op.notePath` was read from a scan taken before any of this sync's changes ran, and
+ * an operation applied earlier can already have moved the file: renaming the folder
+ * note of `EP/Design` carries everything below it, so a second operation on a page
+ * inside that folder finds `op.notePath` naming somewhere that no longer exists.
+ *
+ * The planned path is checked first because it is almost always still right, and
+ * `locateIdentity` walks every note in the vault — paying that per operation would make
+ * a batch of twenty confirmed moves twenty passes over the mirror. The check is that the
+ * note *there* is still this page's, not merely that something is: after a rename two
+ * operations can have exchanged paths, and writing one page's identity block over
+ * another's would be worse than the stale path this exists to avoid.
+ */
+function currentPath(deps: StructureDeps, op: StructureOp): string {
+  if (deps.vault.readIdentity(op.notePath)?.id === op.pageId) return op.notePath;
+  return deps.vault.locateIdentity(op.pageId) ?? op.notePath;
+}
+
+/**
+ * The folder rename still outstanding, measured against where the note is now.
+ *
+ * The *name* the folder must take is the note's own and cannot go stale — it is the
+ * file name the user chose. Where that folder currently sits can, so it is read off
+ * the live path rather than taken from the plan. `null` means there is nothing left to
+ * do, which is the ordinary answer once an ancestor's rename has already carried this
+ * folder along.
+ */
+function folderRenameFor(op: StructureOp, notePath: string): FolderRename | null {
+  if (op.folderRename === null) return null;
+
+  const folder = parentPath(notePath);
+  if (folder.length === 0) return null;
+
+  const to = `${parentPath(folder)}/${baseName(op.folderRename.to)}`;
+  return folder === to ? null : { from: folder, to };
+}
+
 /**
  * Renames a folder-note's folder to match its note (FR-7.6), answering with the
  * note's path afterwards.
@@ -87,13 +133,15 @@ async function sendChange(
  * wikilink pointing into the folder — including the user's own — is rewritten by
  * Obsidian rather than left dangling.
  */
-async function renameFolder(deps: StructureDeps, op: StructureOp): Promise<string | AppError> {
-  if (op.folderRename === null) return op.notePath;
-
-  const moved = await deps.vault.move(op.folderRename.from, op.folderRename.to);
+async function renameFolder(
+  deps: StructureDeps,
+  rename: FolderRename,
+  notePath: string,
+): Promise<string | AppError> {
+  const moved = await deps.vault.move(rename.from, rename.to);
   if (!moved.ok) return moved.error;
 
-  return `${op.folderRename.to}/${op.notePath.slice(op.folderRename.from.length + 1)}`;
+  return `${rename.to}/${notePath.slice(rename.from.length + 1)}`;
 }
 
 /**
@@ -129,14 +177,28 @@ async function writeIdentity(
   return written.ok ? written.value : written.error;
 }
 
+/** One operation carried out: the page's new record, and the folder move it made. */
+interface Applied {
+  readonly state: PageState;
+  /** `null` when no folder moved, so descendants need no patching. */
+  readonly rename: FolderRename | null;
+}
+
 /** Applies one operation and answers with the page's new index record. */
 async function applyOne(
   deps: StructureDeps,
   op: StructureOp,
   state: PageState,
-): Promise<PageState | AppError> {
-  const notePath = await renameFolder(deps, op);
-  if (notePath instanceof AppError) return notePath;
+): Promise<Applied | AppError> {
+  const found = currentPath(deps, op);
+  const rename = folderRenameFor(op, found);
+
+  let notePath = found;
+  if (rename !== null) {
+    const moved = await renameFolder(deps, rename, found);
+    if (moved instanceof AppError) return moved;
+    notePath = moved;
+  }
 
   // A folder correction on its own changes nothing Confluence knows about: the title
   // and the parent are both already what the page holds. Sending the `PUT` anyway
@@ -144,7 +206,7 @@ async function applyOne(
   // a corporate wiki, in return for nothing.
   if (op.title === null && op.parent === null) {
     deps.logger.debug(`Structure: renamed a folder locally; ${op.pageId} is unchanged remotely.`);
-    return { ...state, localPath: notePath, lastSyncedAt: deps.now() };
+    return { state: { ...state, localPath: notePath, lastSyncedAt: deps.now() }, rename };
   }
 
   const sent = await sendChange(deps, op, state);
@@ -156,14 +218,17 @@ async function applyOne(
   deps.logger.debug(`Structure: ${op.pageId} is now "${sent.title}" at ${notePath}.`);
 
   return {
-    ...state,
-    title: sent.title,
-    parentId: op.parent === null ? state.parentId : op.parent.to,
-    localPath: notePath,
-    remoteVersion: sent.version,
-    alias: op.title === null ? state.alias : null,
-    localHash: await sha256(written),
-    lastSyncedAt: deps.now(),
+    state: {
+      ...state,
+      title: sent.title,
+      parentId: op.parent === null ? state.parentId : op.parent.to,
+      localPath: notePath,
+      remoteVersion: sent.version,
+      alias: op.title === null ? state.alias : null,
+      localHash: await sha256(written),
+      lastSyncedAt: deps.now(),
+    },
+    rename,
   };
 }
 
@@ -178,7 +243,7 @@ async function applyOne(
 function followDescendants(
   pages: Readonly<Record<string, PageState>>,
   changed: ReadonlyMap<string, PageState>,
-  renames: readonly { readonly from: string; readonly to: string }[],
+  renames: readonly FolderRename[],
 ): readonly PageState[] {
   if (renames.length === 0) return [];
 
@@ -186,15 +251,29 @@ function followDescendants(
   for (const [pageId, state] of Object.entries(pages)) {
     if (changed.has(pageId)) continue;
 
-    const rename = renames.find((candidate) => state.localPath.startsWith(`${candidate.from}/`));
-    if (rename === undefined) continue;
+    const moved = relocated(state.localPath, renames);
+    if (moved === state.localPath) continue;
 
-    followed.push({
-      ...state,
-      localPath: `${rename.to}${state.localPath.slice(rename.from.length)}`,
-    });
+    followed.push({ ...state, localPath: moved });
   }
   return followed;
+}
+
+/**
+ * A path carried through every rename that applies to it, in the order they ran.
+ *
+ * All of them, not the first match: renaming `EP/Design` and then `EP/Designs/Model`
+ * moves a note inside the second folder *twice*, and stopping at the first match would
+ * record it under a folder that no longer exists.
+ */
+function relocated(path: string, renames: readonly FolderRename[]): string {
+  return renames.reduce(
+    (current, rename) =>
+      current.startsWith(`${rename.from}/`)
+        ? `${rename.to}${current.slice(rename.from.length)}`
+        : current,
+    path,
+  );
 }
 
 /**
@@ -214,7 +293,7 @@ export async function applyStructure(
 ): Promise<StructureOutcome> {
   const changed = new Map<string, PageState>();
   const failures: SyncFailure[] = [];
-  const renames: { from: string; to: string }[] = [];
+  const renames: FolderRename[] = [];
 
   const ordered = [...ops].sort(
     (a, b) => parentPath(a.notePath).length - parentPath(b.notePath).length,
@@ -230,8 +309,10 @@ export async function applyStructure(
       continue;
     }
 
-    changed.set(op.pageId, result);
-    if (op.folderRename !== null) renames.push(op.folderRename);
+    changed.set(op.pageId, result.state);
+    // The rename that actually happened, not the one that was planned: an ancestor's
+    // move may already have carried this folder somewhere else.
+    if (result.rename !== null) renames.push(result.rename);
   }
 
   return {

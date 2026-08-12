@@ -231,3 +231,78 @@ describe('a folder renamed by hand (FR-7.6)', () => {
     expect(pageState('3')?.localPath).toBe('EP/Design/Data Model.md');
   });
 });
+
+describe('nested folder notes renamed in one sync (FR-7.6)', () => {
+  beforeEach(async () => {
+    // A grandchild, so "Data Model" is itself a folder note inside "Design"'s folder.
+    client.pages = [...client.pages, { id: '4', title: 'Field', parentId: '3' }];
+    await established();
+  });
+
+  it('renames both folders, ancestor first', async () => {
+    // The ancestor's rename carries the descendant's folder with it, so the path the
+    // plan recorded for the second operation no longer exists by the time it runs.
+    await vault.move('EP/Design/Design.md', 'EP/Design/Designs.md');
+    await vault.move('EP/Design/Data Model/Data Model.md', 'EP/Design/Data Model/Data Models.md');
+
+    const report = await sync(APPLY);
+
+    expect(report.failures).toEqual([]);
+    expect(client.updates.map((update) => update.title)).toEqual(['Designs', 'Data Models']);
+    expect([...vault.files.keys()].sort()).toEqual([
+      'EP/Architecture.md',
+      'EP/Designs/Data Models/Data Models.md',
+      'EP/Designs/Data Models/Field.md',
+      'EP/Designs/Designs.md',
+      'EP/EP.md',
+    ]);
+  });
+
+  it('carries a page inside both renamed folders through both of them', async () => {
+    // "Field" moved twice — once with each folder above it. A patch that stopped at
+    // the first rename would record it under a folder that no longer exists.
+    await vault.move('EP/Design/Design.md', 'EP/Design/Designs.md');
+    await vault.move('EP/Design/Data Model/Data Model.md', 'EP/Design/Data Model/Data Models.md');
+
+    await sync(APPLY);
+
+    expect(pageState('4')?.localPath).toBe('EP/Designs/Data Models/Field.md');
+  });
+});
+
+describe('a page the remote renamed and the user moved (FR-3.7, FR-7.5)', () => {
+  beforeEach(async () => {
+    client.pages = [...client.pages, { id: '4', title: 'Field', parentId: '3' }];
+    await established();
+
+    // The user drags a leaf into another page's folder…
+    await vault.move('EP/Design/Data Model/Field.md', 'EP/Design/Field.md');
+    // …while a colleague renames that same page in Confluence.
+    client.pages = client.pages.map((page) =>
+      page.id === '4' ? { ...page, title: 'Field v2', version: 5, storage: '<p>Newer.</p>' } : page,
+    );
+  });
+
+  it('leaves one note for the page, not two', async () => {
+    // The relocation was planned from the path the index remembered. With the file no
+    // longer there the move failed, and the pull then wrote the colleague's edit into
+    // a *second* note at the tree-derived path — which the user never opens, while
+    // their own note keeps the stale body.
+    const report = await sync(APPLY);
+
+    expect([...vault.files.keys()].filter((path) => path.includes('Field'))).toEqual([
+      'EP/Design/Data Model/Field v2.md',
+    ]);
+    expect(report.failures).toEqual([]);
+  });
+
+  it('gives that one note the colleague’s body, and reparents the page', async () => {
+    await sync(APPLY);
+
+    expect(vault.files.get('EP/Design/Data Model/Field v2.md')).toContain('Newer.');
+    expect(pageState('4')?.localPath).toBe('EP/Design/Data Model/Field v2.md');
+    // The local move still reaches Confluence: it is a change to the page's parent,
+    // which the rename says nothing about.
+    expect(client.updates.map((update) => update.parentId)).toEqual(['2']);
+  });
+});

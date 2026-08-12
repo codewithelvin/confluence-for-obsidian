@@ -140,6 +140,20 @@ describe('pushing one note (FR-5.6)', () => {
     expect(state.forSubscription('sub').pages['1']?.remoteVersion).toBe(2);
   });
 
+  it('reads the note at the path it was invoked on, not the recorded one', async () => {
+    // The command is reached from a note that is open. If the user moved it since the
+    // last sync, the recorded path names a file that is not there any more.
+    client.pages = [{ id: '1', title: 'Page 1', version: 1 }];
+    await track('1', 'ENG/One.md', 'Edited.', true);
+    await vault.move('ENG/One.md', 'ENG/Folder/One.md');
+
+    const result = await service.pushNote('ENG/Folder/One.md');
+
+    if (!result.ok) throw new Error(result.error.userMessage);
+    expect(result.value.pushed.map((page) => page.pageId)).toEqual(['1']);
+    expect(result.value.blocked).toEqual([]);
+  });
+
   it('refuses a note outside every mount', async () => {
     const result = await service.pushNote('Personal/Diary.md');
 
@@ -226,6 +240,22 @@ describe('pushing every modified note (FR-5.6, US-4)', () => {
     if (!result.ok) throw new Error(result.error.userMessage);
     expect(result.value.pushed).toHaveLength(0);
     expect(client.updates).toHaveLength(0);
+  });
+
+  it('pushes a note the user edited and then moved', async () => {
+    // Matched by identity, as the pull planner matches the same notes. Matching on the
+    // recorded path loses this edit *silently*: not pushed, not blocked, and not even
+    // counted as skipped, so the report says nothing about the work left behind.
+    await track('1', 'ENG/One.md', 'Edited.', true);
+    await vault.move('ENG/One.md', 'ENG/Folder/One.md');
+
+    const result = await service.pushSubscription(SUBSCRIPTION);
+
+    if (!result.ok) throw new Error(result.error.userMessage);
+    expect(result.value.pushed.map((page) => page.pageId)).toEqual(['1']);
+    expect(client.updates).toHaveLength(1);
+    // And the index now agrees with the disk about where that note is.
+    expect(state.forSubscription('sub').pages['1']?.localPath).toBe('ENG/Folder/One.md');
   });
 
   it('refuses when the subscription points at a connection that is gone', async () => {

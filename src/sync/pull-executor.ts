@@ -342,11 +342,25 @@ export async function pullSinglePage(
     : ok(state);
 }
 
+/** What a deletion pass managed to remove, and what stopped it (FR-3.5, FR-3.9). */
+export interface DeleteOutcome {
+  /**
+   * Notes that are genuinely gone.
+   *
+   * Kept apart from what was *asked for*, because the caller drops the index entry of
+   * everything in here: a page whose file the vault refused to trash must keep its
+   * entry, or the note is left on disk with an identity nothing tracks.
+   */
+  readonly deleted: readonly LocalPage[];
+  readonly failures: readonly SyncFailure[];
+}
+
 /** Trashes the notes of pages that no longer exist remotely (FR-3.5). */
 export async function deletePages(
   deps: ExecutorDeps,
   pages: readonly LocalPage[],
-): Promise<readonly SyncFailure[]> {
+): Promise<DeleteOutcome> {
+  const deleted: LocalPage[] = [];
   const failures: SyncFailure[] = [];
 
   for (const page of pages) {
@@ -357,6 +371,7 @@ export async function deletePages(
     }
     await deps.vault.removeEmptyFolder(parentPath(page.path));
     await deps.fragments.remove(page.pageId);
+    deleted.push(page);
   }
-  return failures;
+  return { deleted, failures };
 }

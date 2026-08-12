@@ -102,27 +102,73 @@ export interface PlanInput {
 }
 
 /**
- * Moves that take a page from where it is to where it belongs.
+ * Moves that take a page from `at` to where the new tree puts it.
  *
  * A folder note is moved by its folder first, so its children travel with it in
  * one operation instead of one per descendant; the note inside is then renamed
  * if the title also changed.
  */
-function movesFor(previous: PageState, mapped: MappedPage): MoveOp[] {
+function movesFor(previous: PageState, mapped: MappedPage, at: string): MoveOp[] {
   const moves: MoveOp[] = [];
-  let notePath = previous.localPath;
+  let notePath = at;
 
   if (previous.isFolderNote) {
-    const from = parentPath(previous.localPath);
+    const from = parentPath(at);
     const to = mapped.folderPath ?? parentPath(mapped.notePath);
     if (from !== to) {
       moves.push({ from, to });
-      notePath = `${to}/${previous.localPath.slice(from.length + 1)}`;
+      notePath = `${to}/${at.slice(from.length + 1)}`;
     }
   }
 
   if (notePath !== mapped.notePath) moves.push({ from: notePath, to: mapped.notePath });
   return moves;
+}
+
+/**
+ * The remote-driven move this page needs, measured against where its note *is*.
+ *
+ * The index records where the note was left at the last sync, and a move planned from
+ * that path is wrong the moment the **user** has moved the file: the source no longer
+ * exists, the move fails, and the pull then writes a *second note for one page* at the
+ * path the remote tree derived. Which location is authoritative is §6.6.3's three-way
+ * reading over again:
+ *
+ *   the remote moved the page → the file follows it, from wherever the user left it
+ *   only the user moved it    → no relocation at all. Their placement is the authority
+ *                               (FR-7.5) and the structure planner owns it
+ *
+ * Getting the second case wrong drags the file back out of the folder they just
+ * dropped it into, which is precisely what FR-7.5 forbids.
+ */
+function relocationFor(
+  page: ConfluencePageRef,
+  previous: PageState,
+  mapped: MappedPage,
+  scanned: ScannedNote,
+): MoveOp[] {
+  const displaced = scanned.path !== previous.localPath;
+  if (!displaced) return movesFor(previous, mapped, previous.localPath);
+
+  const remoteMoved = page.parentId !== previous.parentId || page.title !== previous.title;
+  if (!remoteMoved) return [];
+
+  // A folder note may be followed *by its folder* only while it is still that folder's
+  // note. If the user has dragged the note out on its own, the folder now enclosing it
+  // belongs to somebody else — at the top level of the mirror that is the mount itself —
+  // and moving it would carry every unrelated page in it along. That shape is a demotion,
+  // which §6.5.4 keeps out of every automatic path.
+  if (previous.isFolderNote && !ownsItsFolder(scanned.path)) return [];
+  return movesFor(previous, mapped, scanned.path);
+}
+
+/** Whether a note is still the folder note of the folder it sits in (`Title/Title.md`). */
+function ownsItsFolder(path: string): boolean {
+  const folder = parentPath(path);
+  if (folder.length === 0) return false;
+
+  const name = path.slice(folder.length + 1).replace(/\.md$/i, '');
+  return folder.slice(folder.lastIndexOf('/') + 1) === name;
 }
 
 interface Buckets {
@@ -181,7 +227,7 @@ function classifyTracked(
     return false;
   }
 
-  const moves = movesFor(previous, mapped);
+  const moves = relocationFor(page, previous, mapped, scanned);
   if (moves.length > 0) {
     buckets.relocate.push({
       pageId: page.id,

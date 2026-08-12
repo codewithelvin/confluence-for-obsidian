@@ -219,7 +219,10 @@ export class SyncEngine {
     const relocated = await this.relocateAll(executor, plan, structure, failures);
     const deleted = await this.deleteAll(executor, plan, callbacks, failures);
 
-    const pulled = await pullPages(executor, pullTargets(work), {
+    // The *applied* relocations, not the planned ones: a page whose move was
+    // suppressed or failed is still where it was, and a pull that trusted the plan
+    // would write its body into a second note for the same page.
+    const pulled = await pullPages(executor, pullTargets(work, relocated), {
       onPage: (done, total) => {
         callbacks.onProgress?.({ phase: 'applying', done, total, detail: 'Writing pages' });
       },
@@ -342,7 +345,15 @@ export class SyncEngine {
     return done;
   }
 
-  /** Never removes anything the user has not been shown and agreed to (FR-3.5). */
+  /**
+   * Never removes anything the user has not been shown and agreed to (FR-3.5).
+   *
+   * Answers with the notes that were *actually* trashed, not the ones that were
+   * confirmed. A file the vault refused to remove is still on disk, and reporting it
+   * as deleted would both overstate what happened and drop its index entry — leaving
+   * a note carrying a Confluence identity that nothing tracks, which the next sync
+   * would offer as an untracked candidate.
+   */
   private async deleteAll(
     executor: ExecutorDeps,
     plan: PullPlan,
@@ -357,8 +368,9 @@ export class SyncEngine {
       return [];
     }
 
-    failures.push(...(await deletePages(executor, plan.deleteLocal)));
-    return plan.deleteLocal;
+    const outcome = await deletePages(executor, plan.deleteLocal);
+    failures.push(...outcome.failures);
+    return outcome.deleted;
   }
 
   private async persist(

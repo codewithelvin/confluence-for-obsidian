@@ -141,7 +141,12 @@ export class PushService {
       );
     }
 
-    return ok(await this.run(subscription, connection, [previous], prompts));
+    // The path the user invoked on, not the one the index remembers: this command is
+    // reached from a note that is open, and if they moved it since the last sync the
+    // recorded path names a file that is no longer there.
+    const target =
+      previous.localPath === notePath ? previous : { ...previous, localPath: notePath };
+    return ok(await this.run(subscription, connection, [target], prompts));
   }
 
   /**
@@ -171,18 +176,27 @@ export class PushService {
     if (!scanned.ok) return scanned;
 
     const pages = this.deps.state.forSubscription(subscription.id).pages;
-    const byPath = new Map(
-      scanned.value.filter((note) => !note.isConflictCopy).map((note) => [note.path, note.hash]),
+    // Located by *identity*, as the pull planner locates the same notes: matching on
+    // the recorded path instead loses a note the user has both edited and moved, and
+    // loses it silently — it is not pushed, not blocked and not even counted as
+    // skipped, so the report says nothing about the edit that stayed behind.
+    const byId = new Map(
+      scanned.value.flatMap((note) =>
+        note.isConflictCopy || note.identity === null ? [] : [[note.identity.id, note] as const],
+      ),
     );
 
     const modified: PageState[] = [];
     let skipped = 0;
     for (const state of Object.values(pages)) {
-      const hash = byPath.get(state.localPath);
+      const note = byId.get(state.pageId);
       // A note that is gone is an orphan, which D6 says is never a remote action.
-      if (hash === undefined) continue;
-      if (hash === state.localHash) skipped += 1;
-      else modified.push(state);
+      if (note === undefined) continue;
+      if (note.hash === state.localHash) skipped += 1;
+      // Pushed at the path the file is *at*: the recorded one may name where the user
+      // moved it from, and the push reads and rewrites the file by that path.
+      else
+        modified.push(note.path === state.localPath ? state : { ...state, localPath: note.path });
     }
 
     const report = await this.run(subscription, connection, modified, prompts, progress);

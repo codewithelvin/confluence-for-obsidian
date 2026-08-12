@@ -274,6 +274,61 @@ describe('remote moves and renames', () => {
     expect(result.unchanged).toBe(1);
   });
 
+  it('relocates a renamed page from where the user has since moved its file', () => {
+    // The index names where the note *was*. Planning the move from there fails — the
+    // source is gone — and the pull then writes the body to the tree-derived path,
+    // leaving two notes claiming one page.
+    const result = plan(
+      [ref('1', 'Renamed', { version: 2 })],
+      [note('1', 'ENG/Sub/A.md', 'hash')],
+      stateOf(tracked('1', 'ENG/A.md', { title: 'A' })),
+    );
+
+    expect(result.relocate[0]?.moves).toEqual([{ from: 'ENG/Sub/A.md', to: 'ENG/Renamed.md' }]);
+  });
+
+  it('plans no relocation when only the user moved the note (FR-7.5)', () => {
+    // The page gained a child, so the tree wants it as a folder note — but the user
+    // has dragged the file somewhere of their own, and their placement is the
+    // authority. Moving it would drag the file straight back out again.
+    const result = plan(
+      [ref('1', 'A'), ref('2', 'B', { parentId: '1' })],
+      [note('1', 'ENG/Elsewhere/A.md', 'hash')],
+      stateOf(tracked('1', 'ENG/A.md', { title: 'A' })),
+    );
+
+    expect(result.relocate).toHaveLength(0);
+  });
+
+  it('never follows a folder note by a folder it no longer owns', () => {
+    // The user dragged the note out of its own folder and into the top of the mirror,
+    // where the enclosing folder is the *mount*. Following it by that folder would move
+    // the whole mirror inside itself. Breaking the folder-note shape is a demotion, and
+    // §6.5.4 keeps those out of every automatic path.
+    const result = plan(
+      [ref('1', 'Renamed', { version: 2 }), ref('2', 'B', { parentId: '1' })],
+      [note('1', 'ENG/A.md', 'hash')],
+      stateOf(tracked('1', 'ENG/A/A.md', { title: 'A', isFolderNote: true })),
+    );
+
+    expect(result.relocate).toHaveLength(0);
+  });
+
+  it('follows a folder note whose whole folder the user moved', () => {
+    // The shape is intact — the note is still its folder's note — so the folder is the
+    // right thing to move, and its children travel with it.
+    const result = plan(
+      [ref('1', 'Renamed', { version: 2 }), ref('2', 'B', { parentId: '1' })],
+      [note('1', 'ENG/Archive/A/A.md', 'hash')],
+      stateOf(tracked('1', 'ENG/A/A.md', { title: 'A', isFolderNote: true })),
+    );
+
+    expect(result.relocate[0]?.moves).toEqual([
+      { from: 'ENG/Archive/A', to: 'ENG/Renamed' },
+      { from: 'ENG/Renamed/A.md', to: 'ENG/Renamed/Renamed.md' },
+    ]);
+  });
+
   it('moves parents before their children', () => {
     const result = plan(
       [ref('1', 'Renamed', { version: 2 }), ref('2', 'B', { parentId: '1' })],

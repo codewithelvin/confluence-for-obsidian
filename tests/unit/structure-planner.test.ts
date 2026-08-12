@@ -406,32 +406,31 @@ describe('retargetPulls', () => {
     // Writing to the remote-derived path would create a *second* note for one page.
     const items = retargetPulls({
       pull: [pullItem('1', 'EP/Architecture.md')],
-      relocate: [],
-      suppressRelocate: new Set(),
+      relocated: [],
       local: [note('EP/Architecture v2.md', '1')],
     });
 
     expect(items[0]?.path).toBe('EP/Architecture v2.md');
   });
 
-  it('leaves a page this sync is relocating alone', () => {
-    // The relocate runs first and puts the file exactly where the pull expects it, so
-    // the scanned path is the stale one here.
+  it('leaves a page this sync has relocated alone', () => {
+    // The move ran first and put the file exactly where the pull expects it, so the
+    // scanned path is the stale one here.
     const items = retargetPulls({
       pull: [pullItem('1', 'EP/Moved/Architecture.md')],
-      relocate: [{ pageId: '1' }],
-      suppressRelocate: new Set(),
+      relocated: [{ pageId: '1' }],
       local: [note('EP/Architecture.md', '1')],
     });
 
     expect(items[0]?.path).toBe('EP/Moved/Architecture.md');
   });
 
-  it('redirects a page whose relocate was suppressed', () => {
+  it('redirects a page whose relocate did not happen', () => {
+    // Suppressed because the page changed on both sides, or simply failed. Either way
+    // the file never moved, and writing to the planned path would make a second note.
     const items = retargetPulls({
       pull: [pullItem('1', 'EP/Moved/Architecture.md')],
-      relocate: [{ pageId: '1' }],
-      suppressRelocate: new Set(['1']),
+      relocated: [],
       local: [note('EP/Architecture.md', '1')],
     });
 
@@ -441,8 +440,7 @@ describe('retargetPulls', () => {
   it('leaves an ordinary pull untouched', () => {
     const items = retargetPulls({
       pull: [pullItem('1', 'EP/Architecture.md')],
-      relocate: [],
-      suppressRelocate: new Set(),
+      relocated: [],
       local: [note('EP/Architecture.md', '1')],
     });
 

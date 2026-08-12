@@ -13,9 +13,16 @@ import type { ScannedNote } from '../vault/vault-gateway';
 
 export interface RetargetInput {
   readonly pull: readonly PullItem[];
-  /** Remote-driven moves this sync will carry out *before* the pull. */
-  readonly relocate: readonly { readonly pageId: string }[];
-  readonly suppressRelocate: ReadonlySet<string>;
+  /**
+   * Remote-driven moves this sync **actually carried out**, not the ones it planned.
+   *
+   * A planned move is not a guarantee: it can be suppressed because the page changed
+   * on both sides, or simply fail. Either way the file is still where it was, and a
+   * pull that trusted the plan would write its body somewhere else — which is the
+   * second note this module exists to prevent. So the applied list is what arrives
+   * here, and the pull is retargeted for everything not in it.
+   */
+  readonly relocated: readonly { readonly pageId: string }[];
   readonly local: readonly ScannedNote[];
 }
 
@@ -27,17 +34,11 @@ export interface RetargetInput {
  * create a **second note for the same page**, which the next sync would see as two
  * files claiming one identity. The file's current location wins.
  *
- * A page this sync is relocating is left alone: the relocate runs first and puts the
- * file exactly where the pull expects it, so the scanned path is the stale one there.
- * A relocate the structure planner suppressed does *not* run, so those pages are
- * redirected like any other.
+ * A page this sync has already relocated is left alone: the move ran first and put the
+ * file exactly where the pull expects it, so there the *scanned* path is the stale one.
  */
 export function retargetPulls(input: RetargetInput): readonly PullItem[] {
-  const moving = new Set(
-    input.relocate
-      .filter((item) => !input.suppressRelocate.has(item.pageId))
-      .map((item) => item.pageId),
-  );
+  const moved = new Set(input.relocated.map((item) => item.pageId));
   const scanned = new Map(
     input.local.flatMap((note) =>
       note.isConflictCopy || note.identity === null ? [] : [[note.identity.id, note.path] as const],
@@ -46,7 +47,7 @@ export function retargetPulls(input: RetargetInput): readonly PullItem[] {
 
   return input.pull.map((item) => {
     const here = scanned.get(item.page.id);
-    if (here === undefined || here === item.path || moving.has(item.page.id)) return item;
+    if (here === undefined || here === item.path || moved.has(item.page.id)) return item;
     return { ...item, path: here };
   });
 }
@@ -54,9 +55,9 @@ export function retargetPulls(input: RetargetInput): readonly PullItem[] {
 /**
  * Everything one sync decided before it started writing.
  *
- * The two plans and the scan they were both read from travel together, because the
- * pull's target for a page depends on what the structure plan found (§6.6.2 step 4):
- * a note the user moved is pulled where it now is, not where the remote tree says.
+ * The two plans and the scan they were both read from travel together, because they
+ * must be answering about one moment (§6.6.2 step 4): a note the user moved is pulled
+ * where it now is, not where the remote tree says.
  */
 export interface SyncWork {
   readonly plan: PullPlan;
@@ -64,11 +65,9 @@ export interface SyncWork {
   readonly scanned: readonly ScannedNote[];
 }
 
-export function pullTargets(work: SyncWork): readonly PullItem[] {
-  return retargetPulls({
-    pull: work.plan.pull,
-    relocate: work.plan.relocate,
-    suppressRelocate: work.structure.suppressRelocate,
-    local: work.scanned,
-  });
+export function pullTargets(
+  work: SyncWork,
+  relocated: readonly { readonly pageId: string }[],
+): readonly PullItem[] {
+  return retargetPulls({ pull: work.plan.pull, relocated, local: work.scanned });
 }

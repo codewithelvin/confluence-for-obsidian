@@ -395,6 +395,20 @@ describe('remote deletions (FR-3.5)', () => {
     expect(state.forSubscription('sub').pages['1']).toBeUndefined();
   });
 
+  it('keeps a page whose note could not be trashed', async () => {
+    // Reported as a failure, and *not* as a deletion. Dropping the index entry would
+    // leave a note on disk carrying a Confluence identity that nothing tracks, which
+    // the next sync would offer back as an untracked candidate.
+    vault.failTrash.add('ENG/A.md');
+
+    const report = await sync({ confirmDeletions: () => Promise.resolve(true) });
+
+    expect(report.deleted).toBe(0);
+    expect(report.failures).toHaveLength(1);
+    expect(vault.files.has('ENG/A.md')).toBe(true);
+    expect(state.forSubscription('sub').pages['1']).toBeDefined();
+  });
+
   it('forgets a page that is gone on both sides without asking', async () => {
     vault.files.delete('ENG/A.md');
     let asked = false;

@@ -149,6 +149,10 @@ export class FakeVaultGateway implements VaultGateway {
     }
     this.moves.push({ from, to });
 
+    // Whether a *folder* is moving has to be decided before the files move, or every
+    // one of them has just been deleted from under the question.
+    const isFolder = !this.files.has(from) && !this.binaries.has(from);
+
     for (const [path, content] of [...this.files]) {
       if (path !== from && !path.startsWith(`${from}/`)) continue;
       const target = `${to}${path.slice(from.length)}`;
@@ -159,12 +163,25 @@ export class FakeVaultGateway implements VaultGateway {
       this.identities.delete(path);
       if (identity !== undefined) this.identities.set(target, identity);
     }
-    this.folders.delete(from);
-    this.folders.add(to);
+
+    // Only for a folder. Registering a renamed *note* as a folder leaves a path in
+    // `folders` that no folder occupies, and `exists` then answers true for it
+    // forever — which silently defeats any test whose subject checks a path is gone.
+    if (isFolder) {
+      this.folders.delete(from);
+      this.folders.add(to);
+    }
     return Promise.resolve(ok(undefined));
   }
 
+  /** Paths the vault refuses to trash, to exercise a deletion that does not happen. */
+  readonly failTrash = new Set<string>();
+
   trash(path: string): Promise<Result<void, AppError>> {
+    if (this.failTrash.has(path)) {
+      return Promise.resolve(err(new AppError('VAULT_WRITE_FAILED', `Refusing to trash ${path}`)));
+    }
+
     this.trashed.push(path);
     this.files.delete(path);
     this.identities.delete(path);
