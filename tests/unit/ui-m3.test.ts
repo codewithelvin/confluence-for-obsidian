@@ -7,6 +7,13 @@ import { SyncController } from '../../src/sync/sync-controller';
 import { SyncStateStore } from '../../src/sync/sync-state';
 import { SuspensionRegistry } from '../../src/sync/suspension';
 import { Logger } from '../../src/util/logger';
+import type { FragmentMap } from '../../src/convert/types';
+import {
+  candidatesIn,
+  childPageSource,
+  childPagesOf,
+  listsOwnChildren,
+} from '../../src/ui/child-pages';
 import {
   describePlaceholder,
   parsePlaceholderFields,
@@ -132,12 +139,15 @@ describe('placeholder renderer (FR-4.5)', () => {
     registerPlaceholderRenderer({
       register: (language, handler) => {
         registered.push(language);
-        handler(FENCE, host, 'ENG/A.md');
+        // Synchronous for every macro but `children`, which is what lets this
+        // assertion read the widget without awaiting anything.
+        void handler(FENCE, host, 'ENG/A.md');
       },
       registerInline: () => undefined,
       pageUrlFor: () => null,
       labelsFor: () => Promise.resolve(new Map()),
       headingsFor: () => [],
+      childPagesFor: () => Promise.resolve([]),
       openExternal: () => undefined,
     });
 
@@ -217,6 +227,251 @@ describe('placeholder renderer (FR-4.5)', () => {
 
       expect(host.textContent).toContain('jira macro');
       expect(host.querySelector('.confluence-toc')).toBeNull();
+    });
+  });
+
+  describe('the children macro, rebuilt from the vault (FR-4.18, D20)', () => {
+    const CHILDREN = 'id: cfb-0001\ntype: macro\nname: children\nlabel: children macro';
+    const PAGES = [
+      { title: 'Bildirişlər modulu', path: 'EP/Backend/Bildirişlər modulu.md' },
+      { title: 'Profil Modulu', path: 'EP/Backend/Profil Modulu/Profil Modulu.md' },
+    ];
+
+    it('lists the child pages as links instead of a labelled widget', () => {
+      // `Backend Xəta Kodları`'s whole body is one of these, and it showed a grey
+      // widget while its 12 child notes sat in the same folder.
+      const host = document.createElement('div');
+      renderPlaceholder(host, CHILDREN, null, () => undefined, [], PAGES);
+
+      expect(host.querySelectorAll('a')).toHaveLength(2);
+      expect(host.querySelector('.confluence-placeholder')).toBeNull();
+      expect(host.textContent).toBe('Bildirişlər moduluProfil Modulu');
+    });
+
+    it('links the note by path with the extension off, as Obsidian resolves it', () => {
+      const host = document.createElement('div');
+      renderPlaceholder(host, CHILDREN, null, () => undefined, [], PAGES);
+
+      const links = Array.from(host.querySelectorAll('a')).map((link) =>
+        link.getAttribute('data-href'),
+      );
+      expect(links).toEqual([
+        'EP/Backend/Bildirişlər modulu',
+        'EP/Backend/Profil Modulu/Profil Modulu',
+      ]);
+    });
+
+    it('falls back to the widget for a page with no children', () => {
+      // Confluence draws an empty list here. A label saying what is preserved says
+      // more than nothing at all — the same reading as `toc` without headings.
+      const host = document.createElement('div');
+      renderPlaceholder(host, CHILDREN, null, () => undefined, [], []);
+
+      expect(host.textContent).toContain('children macro');
+      expect(host.querySelector('.confluence-children')).toBeNull();
+    });
+
+    it('takes the child pages from the notes whose parent is this page', () => {
+      // A page's children are pages, not files: a personal note dropped in the
+      // folder and a sibling page sharing it are both not children.
+      const children = childPagesOf('38543196', [
+        { title: 'Bəyannamələr', path: 'EP/B/Bəyannamələr.md', parentId: '38543196' },
+        { title: 'My own thoughts', path: 'EP/B/My own thoughts.md', parentId: null },
+        { title: 'A sibling page', path: 'EP/B/A sibling page.md', parentId: '8060948' },
+      ]);
+
+      expect(children).toEqual([{ title: 'Bəyannamələr', path: 'EP/B/Bəyannamələr.md' }]);
+    });
+
+    it('orders the list alphabetically, since the tree order is not mirrored', () => {
+      const children = childPagesOf('1', [
+        { title: 'Ərizələr', path: 'a/Ərizələr.md', parentId: '1' },
+        { title: 'Bildirişlər', path: 'a/Bildirişlər.md', parentId: '1' },
+        { title: 'Avtorizasiya', path: 'a/Avtorizasiya.md', parentId: '1' },
+      ]);
+
+      expect(children.map((child) => child.title)).toEqual([
+        'Avtorizasiya',
+        'Bildirişlər',
+        'Ərizələr',
+      ]);
+    });
+
+    it('has nothing to list for a note with no page identity', () => {
+      expect(childPagesOf(null, [{ title: 'x', path: 'x.md', parentId: '1' }])).toEqual([]);
+      expect(childPagesOf('', [{ title: 'x', path: 'x.md', parentId: '1' }])).toEqual([]);
+    });
+
+    it('rebuilds a parameterless macro and refuses every other one', () => {
+      // The parameter that matters is `page=`, which lists *another* page's
+      // children — three of those are in the mirror. Refusing all parameters
+      // costs nothing: all 57 block macros carry none.
+      expect(listsOwnChildren('<ac:structured-macro ac:name="children"/>')).toBe(true);
+      expect(
+        listsOwnChildren(
+          '<ac:structured-macro ac:name="children"><ac:parameter ac:name="page">' +
+            '<ac:link><ri:page ri:content-title="Other"/></ac:link></ac:parameter>' +
+            '</ac:structured-macro>',
+        ),
+      ).toBe(false);
+      expect(
+        listsOwnChildren(
+          '<ac:structured-macro ac:name="children">' +
+            '<ac:parameter ac:name="style">h3</ac:parameter></ac:structured-macro>',
+        ),
+      ).toBe(false);
+    });
+
+    it('walks the folder and one level down, taking each subfolder its folder note', () => {
+      // A subfolder is a child page that has children of its own (D9/D13), so the
+      // note to link is `Title/Title.md` and not everything inside it.
+      const entries = [
+        {
+          name: 'Bildirişlər modulu.md',
+          path: 'EP/B/Bildirişlər modulu.md',
+          basename: 'Bildirişlər modulu',
+          extension: 'md',
+        },
+        {
+          name: 'Toplu VÖEN.xlsx',
+          path: 'EP/B/Toplu VÖEN.xlsx',
+          basename: 'Toplu VÖEN',
+          extension: 'xlsx',
+        },
+        {
+          name: 'Profil Modulu',
+          path: 'EP/B/Profil Modulu',
+          children: [
+            {
+              name: 'Profil Modulu.md',
+              path: 'EP/B/Profil Modulu/Profil Modulu.md',
+              basename: 'Profil Modulu',
+              extension: 'md',
+            },
+            {
+              name: 'A grandchild.md',
+              path: 'EP/B/Profil Modulu/A grandchild.md',
+              basename: 'A grandchild',
+              extension: 'md',
+            },
+          ],
+        },
+        { name: '_attachments', path: 'EP/B/_attachments', children: [] },
+      ];
+
+      const candidates = candidatesIn(entries, (path) => `parent of ${path}`);
+
+      expect(candidates).toEqual([
+        {
+          title: 'Bildirişlər modulu',
+          path: 'EP/B/Bildirişlər modulu.md',
+          parentId: 'parent of EP/B/Bildirişlər modulu.md',
+        },
+        {
+          title: 'Profil Modulu',
+          path: 'EP/B/Profil Modulu/Profil Modulu.md',
+          parentId: 'parent of EP/B/Profil Modulu/Profil Modulu.md',
+        },
+      ]);
+    });
+
+    describe('bound to a real vault', () => {
+      const NOTE = 'EP/B/B.md';
+      const fragment = (xhtml: string): FragmentMap =>
+        new Map([
+          [
+            'cfb-0001',
+            {
+              id: 'cfb-0001',
+              kind: 'block',
+              xhtml,
+              type: 'macro',
+              name: 'children',
+              label: 'children macro',
+            },
+          ],
+        ]);
+      const FOLDER = {
+        children: [
+          { name: 'B.md', path: NOTE, basename: 'B', extension: 'md' },
+          { name: 'Child.md', path: 'EP/B/Child.md', basename: 'Child', extension: 'md' },
+        ],
+      };
+      const app = {
+        metadataCache: {
+          getCache: (path: string) =>
+            path === NOTE
+              ? { frontmatter: { confluence: { id: '38543196' } } }
+              : { frontmatter: { confluence: { parent: '38543196' } } },
+        },
+        vault: { getFileByPath: (path: string) => (path === NOTE ? { parent: FOLDER } : null) },
+      } as unknown as App;
+
+      const sourceOver = (xhtml: string) =>
+        childPageSource(app, { fragmentsFor: () => Promise.resolve(fragment(xhtml)) });
+
+      it('lists the children of the page the note carries', async () => {
+        const children = await sourceOver('<ac:structured-macro ac:name="children"/>')(
+          NOTE,
+          'cfb-0001',
+        );
+
+        expect(children).toEqual([{ title: 'Child', path: 'EP/B/Child.md' }]);
+      });
+
+      it('refuses a macro that may name another page', async () => {
+        const source = sourceOver(
+          '<ac:structured-macro ac:name="children"><ac:parameter ac:name="page">Other' +
+            '</ac:parameter></ac:structured-macro>',
+        );
+
+        expect(await source(NOTE, 'cfb-0001')).toEqual([]);
+      });
+
+      it('refuses a placeholder whose fragment is no longer cached', async () => {
+        // §6.4.3 rule 4's case, seen from the renderer: nothing is known about the
+        // macro, so nothing may be assumed about it.
+        const source = childPageSource(app, { fragmentsFor: () => Promise.resolve(new Map()) });
+
+        expect(await source(NOTE, 'cfb-0001')).toEqual([]);
+      });
+
+      it('refuses a note that is not in the vault', async () => {
+        const source = sourceOver('<ac:structured-macro ac:name="children"/>');
+
+        expect(await source('EP/gone.md', 'cfb-0001')).toEqual([]);
+      });
+    });
+
+    it('asks for child pages only for a children macro', async () => {
+      // Every other widget must render without a fragment read it has no use for,
+      // and `view-file` alone is on 201 pages.
+      const asked: string[] = [];
+      const deps = {
+        registerInline: () => undefined,
+        pageUrlFor: () => null,
+        labelsFor: () => Promise.resolve(new Map<string, string>()),
+        headingsFor: () => [],
+        childPagesFor: (_path: string, id: string) => {
+          asked.push(id);
+          return Promise.resolve(PAGES);
+        },
+        openExternal: () => undefined,
+      };
+      const rendered: Promise<void>[] = [];
+
+      for (const fence of [FENCE, CHILDREN]) {
+        const host = document.createElement('div');
+        registerPlaceholderRenderer({
+          ...deps,
+          register: (_language, handler) => {
+            rendered.push(Promise.resolve(handler(fence, host, 'EP/Backend/Backend.md')));
+          },
+        });
+      }
+      await Promise.all(rendered);
+
+      expect(asked).toEqual(['cfb-0001']);
     });
   });
 

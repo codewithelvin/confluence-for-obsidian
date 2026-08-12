@@ -23,6 +23,7 @@ import { PushService, type PushPrompts } from './sync/push-service';
 import { SuspensionRegistry } from './sync/suspension';
 import { SyncController } from './sync/sync-controller';
 import { SyncStateStore } from './sync/sync-state';
+import { childPageSource } from './ui/child-pages';
 import { inlinePlaceholderExtension } from './ui/live-preview-placeholders';
 import { orphanActions, type OrphanActions } from './ui/orphan-actions';
 import { PlaceholderLabels } from './ui/placeholder-labels';
@@ -259,9 +260,11 @@ export default class ConfluenceConnectorPlugin extends Plugin {
 
     registerPlaceholderRenderer({
       register: (language, handler) => {
-        this.registerMarkdownCodeBlockProcessor(language, (source, element, context) => {
-          handler(source, element, context.sourcePath);
-        });
+        // The handler's promise is returned, not dropped: a `children` macro reads
+        // the fragment sidecar before it can draw, and Obsidian awaits the result.
+        this.registerMarkdownCodeBlockProcessor(language, (source, element, context) =>
+          handler(source, element, context.sourcePath),
+        );
       },
       registerInline: (handler) => {
         this.registerMarkdownPostProcessor((element, context) =>
@@ -273,6 +276,7 @@ export default class ConfluenceConnectorPlugin extends Plugin {
       // Straight from the metadata cache: Obsidian has already parsed the note,
       // and re-reading it here would be a second parse of a file it knows.
       headingsFor: (sourcePath) => this.app.metadataCache.getCache(sourcePath)?.headings ?? [],
+      childPagesFor: childPageSource(this.app, this.notes),
       openExternal: (url) => {
         window.open(url, '_blank');
       },

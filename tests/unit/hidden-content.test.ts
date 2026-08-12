@@ -304,12 +304,31 @@ describe("a table holding an inline comment's anchor (FR-4.9, FR-4.10)", () => {
   });
 
   it('stays preserved when the table also holds markup Obsidian renders as nothing', () => {
+    // A macro, not an image: D19 shows an image inside a preserved table (§6.4.10),
+    // so an image no longer stands for "markup Obsidian renders as nothing". A
+    // macro still does, and still refuses the whole table.
+    const withMacro = anchored.replace(
+      '<p>Qəbul kriteriyası</p>',
+      '<p><ac:structured-macro ac:name="jira"/></p>',
+    );
+
+    expect(convert(withMacro)).toContain('```confluence-block');
+    expect(certified(withMacro)).toBe(true);
+  });
+
+  it('coexists with an image the table now shows (§6.4.10, D19)', () => {
+    // Two hiding passes over the same clone, each with its own carrier. The point
+    // is that neither undoes the other: the anchor keeps its words and the image
+    // keeps its element, and Confluence gets both back.
     const withImage = anchored.replace(
       '<p>Qəbul kriteriyası</p>',
       `<p><ac:image>${ATTACHED}</ac:image></p>`,
     );
+    const markdown = convert(withImage);
 
-    expect(convert(withImage)).toContain('```confluence-block');
+    expect(markdown).not.toContain('```confluence-block');
+    expect(markdown).toContain('<!--cf-comment:207a9caa-7b89-->');
+    expect(markdown).toContain(`<img src="${EMBED}"/>`);
     expect(certified(withImage)).toBe(true);
   });
 

@@ -46,6 +46,20 @@ describe('ConfluenceClient authentication', () => {
     expect(transport.requests[0]?.headers['Authorization']).toBe('Bearer PAT-TOKEN');
   });
 
+  it('identifies itself with an agent Confluence will not mistake for a browser', async () => {
+    // Left unset, Electron sends Obsidian's own `Mozilla/5.0 … Chrome/… Safari/…`, and
+    // Confluence's XSRF filter reads `Mozilla` as "a browser is calling", answering
+    // `XSRF check failed` in HTML before authentication is reached. `X-Atlassian-Token:
+    // no-check` does not exempt it. Measured on 7.19.6, 2026-08-12; it cost every
+    // `POST /rest/api/content`, while `PUT` and `DELETE` were untouched.
+    const { client, transport } = makeClient([jsonResponse(USER), textResponse(MANIFEST)]);
+    await client.checkConnection();
+
+    const agent = transport.requests[0]?.headers['User-Agent'];
+    expect(agent).toBeDefined();
+    expect(agent).not.toContain('Mozilla');
+  });
+
   it('targets the Data Center v1 API under the context path', async () => {
     const { client, transport } = makeClient([jsonResponse(USER), textResponse(MANIFEST)]);
     await client.checkConnection();
@@ -67,6 +81,18 @@ describe('ConfluenceClient authentication', () => {
     const result = await client.checkConnection();
 
     expect(!result.ok && result.error.code).toBe('AUTH_FAILED');
+  });
+
+  it('reports a token the server answered anonymously as an authentication failure', async () => {
+    // Not hypothetical. Measured on 7.19.6 (2026-08-12): a rejected bearer token comes
+    // back 200 with this body rather than 401, after which reads degrade to what
+    // anonymous can see and the first write answers 403 — which reads as a permission
+    // problem and sends the user to the space's permission screen instead of the token.
+    const { client } = makeClient([jsonResponse({ type: 'anonymous', displayName: 'Anonymous' })]);
+    const result = await client.checkConnection();
+
+    expect(!result.ok && result.error.code).toBe('AUTH_FAILED');
+    expect(!result.ok && result.error.action).toBe('open-settings');
   });
 
   it('reports an SSO login page as a malformed response, not a success', async () => {

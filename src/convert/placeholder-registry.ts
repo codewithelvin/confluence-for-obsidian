@@ -142,6 +142,59 @@ export function readCarriedImageId(html: string): string | null {
 }
 
 /**
+ * Marks the embed in front of it as standing for a whole *block* (spec §6.4.8).
+ *
+ * A second marker rather than a second meaning for `cf-img`, because the two
+ * positions cannot be told apart from the note alone: a macro alone inside a `<p>`
+ * and a macro alone at body level both arrive as a paragraph holding nothing but
+ * an embed. `cf-img` says *fill in this spot inside the paragraph*; this one says
+ * *replace the paragraph*, `<p>` and all. Reading either one the other way round
+ * changes the stored markup and makes the page read-only.
+ */
+export function carriedBlock(id: string): string {
+  return `<!--cf-drawio:${id}-->`;
+}
+
+const CARRIED_BLOCK_PATTERN = /^<!--cf-drawio:(cfb-\d+)-->$/;
+
+/** The fragment id behind a carried-block marker, or `null` for ordinary HTML. */
+export function readCarriedBlockId(html: string): string | null {
+  return CARRIED_BLOCK_PATTERN.exec(html.trim())?.[1] ?? null;
+}
+
+/**
+ * Marks the embed in front of it as standing for an `include` macro (spec §6.4.12).
+ *
+ * The same *position* as `cf-drawio` — replace the paragraph, `<p>` and all — so
+ * the reverse pass reads the two identically. A second name rather than a reuse
+ * because what the marker sits under is a **note** embed, and a reader opening the
+ * source to find `<!--cf-drawio:…-->` beneath one would be told something untrue.
+ * Position is what the reverse pass needs; the name is what the reader needs.
+ */
+export function carriedInclude(id: string): string {
+  return `<!--cf-inc:${id}-->`;
+}
+
+const CARRIED_INCLUDE_PATTERN = /^<!--cf-inc:(cfb-\d+)-->$/;
+
+/** The fragment id behind a carried-include marker, or `null` for ordinary HTML. */
+export function readCarriedIncludeId(html: string): string | null {
+  return CARRIED_INCLUDE_PATTERN.exec(html.trim())?.[1] ?? null;
+}
+
+/**
+ * The fragment id behind any marker that stands for a whole block.
+ *
+ * One reader for both, because they mean the same thing to the trip back: the
+ * paragraph *is* the macro and is replaced by it. Every call site must ask this
+ * rather than either pattern alone, or an include would inflate on one path and
+ * ride into the storage as a literal comment on another.
+ */
+export function readBlockCarrierId(html: string): string | null {
+  return readCarriedBlockId(html) ?? readCarriedIncludeId(html);
+}
+
+/**
  * Marks the code fence above it as standing for a `<pre>` block.
  *
  * A bare fence is otherwise indistinguishable from a code macro with no

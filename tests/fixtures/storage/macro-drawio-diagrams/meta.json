@@ -1,0 +1,4 @@
+{
+  "certified": true,
+  "notes": "Page 36013439 of space EP, whose whole content is three drawio macros — two at body level and one inside a paragraph. The corpus supplies no attachment resolver, so this is the no-preview path: an honest label rather than a broken embed, and an exact round trip either way (§6.4.8, FR-4.13). It also pins the label rule against real parameter soup, which used to read `drawio macro — trueCancelfalseautotoptrue5815` (FR-4.14), and carries Confluence's own empty-named parameter."
+}

@@ -148,6 +148,46 @@ describe('uploading a file the note embeds (FR-8.6)', () => {
     await push(state);
     expect(client.uploads).toEqual([]);
   });
+
+  it('refuses a name Confluence already holds instead of replacing that file', async () => {
+    // `POST child/attachment` creates and does not replace — a repeated name answers
+    // 400 — and this name is missing from the recorded state precisely because the
+    // plugin did not put it there. Re-versioning it would change the picture for every
+    // other page embedding it, and FR-8.7 means it could never be put back.
+    client.attachments.set('1', [
+      {
+        id: 'att-theirs',
+        filename: 'diagram.png',
+        version: 3,
+        size: 99,
+        downloadPath: '/download/attachments/1/diagram.png',
+      },
+    ]);
+
+    const outcome = await push();
+
+    expect(outcome.kind).toBe('blocked');
+    expect(client.uploads).toEqual([]);
+    expect(client.updates).toEqual([]);
+  });
+
+  it('names both the attachment and the local file when it refuses', async () => {
+    client.attachments.set('1', [
+      {
+        id: 'att-theirs',
+        filename: 'diagram.png',
+        version: 3,
+        size: 99,
+        downloadPath: '/download/attachments/1/diagram.png',
+      },
+    ]);
+
+    const outcome = await push();
+    if (outcome.kind !== 'blocked') throw new Error('expected the push to be blocked');
+
+    expect(outcome.blocked.error.userMessage).toContain('diagram.png');
+    expect(outcome.blocked.error.userMessage).toContain(IMAGE);
+  });
 });
 
 describe('embeds that cannot be uploaded (FR-8.6)', () => {

@@ -1,0 +1,26 @@
+[
+  {
+    "id": "cfb-0001",
+    "kind": "block",
+    "xhtml": "<ac:structured-macro ac:name=\"drawio\" ac:schema-version=\"1\" ac:macro-id=\"2228cf45-24c1-433f-94d8-d30ac5d47282\"><ac:parameter ac:name=\"border\">true</ac:parameter><ac:parameter ac:name=\"diagramName\">Sign with blank</ac:parameter><ac:parameter ac:name=\"simpleViewer\">false</ac:parameter><ac:parameter ac:name=\"width\"/><ac:parameter ac:name=\"links\">auto</ac:parameter><ac:parameter ac:name=\"tbstyle\">top</ac:parameter><ac:parameter ac:name=\"lbox\">true</ac:parameter><ac:parameter ac:name=\"diagramWidth\">746</ac:parameter><ac:parameter ac:name=\"revision\">1</ac:parameter><ac:parameter ac:name=\"\"/></ac:structured-macro>",
+    "type": "macro",
+    "name": "drawio",
+    "label": "drawio macro — Sign with blank"
+  },
+  {
+    "id": "cfb-0002",
+    "kind": "block",
+    "xhtml": "<ac:structured-macro ac:name=\"drawio\" ac:schema-version=\"1\" ac:macro-id=\"ed8bf1ac-3bd7-454a-acba-1a6c1185196c\"><ac:parameter ac:name=\"border\">true</ac:parameter><ac:parameter ac:name=\"diagramName\">Cancel</ac:parameter><ac:parameter ac:name=\"simpleViewer\">false</ac:parameter><ac:parameter ac:name=\"width\"/><ac:parameter ac:name=\"links\">auto</ac:parameter><ac:parameter ac:name=\"tbstyle\">top</ac:parameter><ac:parameter ac:name=\"lbox\">true</ac:parameter><ac:parameter ac:name=\"diagramWidth\">581</ac:parameter><ac:parameter ac:name=\"revision\">5</ac:parameter><ac:parameter ac:name=\"\"/></ac:structured-macro>",
+    "type": "macro",
+    "name": "drawio",
+    "label": "drawio macro — Cancel"
+  },
+  {
+    "id": "cfb-0003",
+    "kind": "inline",
+    "xhtml": "<ac:structured-macro ac:name=\"drawio\" ac:schema-version=\"1\" ac:macro-id=\"19c7897b-ff29-4c31-bf0d-b0868ac294f2\"><ac:parameter ac:name=\"border\">true</ac:parameter><ac:parameter ac:name=\"diagramName\">SignWithMobile</ac:parameter><ac:parameter ac:name=\"simpleViewer\">false</ac:parameter><ac:parameter ac:name=\"width\"/><ac:parameter ac:name=\"links\">auto</ac:parameter><ac:parameter ac:name=\"tbstyle\">top</ac:parameter><ac:parameter ac:name=\"lbox\">true</ac:parameter><ac:parameter ac:name=\"diagramWidth\">906</ac:parameter><ac:parameter ac:name=\"revision\">1</ac:parameter><ac:parameter ac:name=\"\"/></ac:structured-macro>",
+    "type": "macro",
+    "name": "drawio",
+    "label": "drawio macro — SignWithMobile"
+  }
+]

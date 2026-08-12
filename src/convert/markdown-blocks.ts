@@ -9,13 +9,16 @@ import type {
   Table,
   TableCell,
 } from 'mdast';
+import { restoreEmoticons } from './emoticons';
 import { isParamsOnly, parseMacroParams } from './macro-params';
 import {
   BLOCK_FENCE_LANGUAGE,
+  readBlockCarrierId,
   readBlockPlaceholderId,
   readCarriedPreId,
 } from './placeholder-registry';
 import { escapeText } from './storage-serialiser';
+import { restoreTableMedia } from './table-media';
 import {
   LAYOUT_CELL,
   LAYOUT_CLOSE,
@@ -254,7 +257,7 @@ function markerOf(node: RootContent | undefined): string | null {
 
 /**
  * Rebuilds `ac:layout` from the markers the forward pass left behind
- * (spec §6.4.8).
+ * (spec §6.4.7).
  *
  * Returns where the layout ended, so the caller resumes after it. An unclosed
  * layout — a user deleted the end marker — consumes the rest of the body rather
@@ -315,12 +318,54 @@ function htmlBlockToStorage(
   previous: RootContent | undefined,
   ctx: ReverseContext,
 ): string {
+  // A block marker on a line of its own means the user deleted the embed in front
+  // of it and left the marker. The macro goes back rather than vanishing, so a
+  // diagram or an included page survives an edit that only looked like a
+  // deletion (§6.4.8, §6.4.12).
+  const block = readBlockCarrierId(value);
+  if (block !== null) return inflateBlock(block, ctx);
+
   const carried = readCarriedPreId(value);
-  if (carried === null) return restoreCommentAnchors(value);
+  // All three restorations are string-level and independent: a preserved table may
+  // hold comment anchors, emoticons and shown images at once, and each has to come
+  // back exactly (§6.4.9, §6.4.10).
+  if (carried === null) {
+    return restoreCommentAnchors(restoreEmoticons(restoreTableMedia(value, ctx)));
+  }
 
   // The fence above has already used it — unless the user deleted the fence, in
   // which case the block goes back rather than disappearing.
   return previous?.type === 'code' ? '' : inflateBlock(carried, ctx);
+}
+
+/** An embed and nothing else — the shape the forward pass wrote for a diagram. */
+const EMBED_ONLY = /^!\[\[[^[\]]+\]\]$/;
+
+/**
+ * The source of a block-level macro shown as a picture or as an included page, or
+ * `null` for an ordinary paragraph (spec §6.4.8, §6.4.12).
+ *
+ * The paragraph is *replaced* by it, `<p>` and all, because the macro was a child
+ * of the body: a wrapper Confluence never sent would fail certification and make
+ * the page read-only.
+ *
+ * The embed has to still be there and be the only thing there. A user who typed
+ * over it has written something the marker no longer describes, and inflating the
+ * macro anyway would delete what they wrote; leaving the marker unread instead
+ * carries it into the storage, where the push verifier stops the page.
+ */
+function carriedBlockMacro(
+  children: readonly PhrasingContent[],
+  ctx: ReverseContext,
+): string | null {
+  if (children.length !== 2) return null;
+
+  const [embed, marker] = children;
+  if (embed?.type !== 'text' || !EMBED_ONLY.test(embed.value.trim())) return null;
+  if (marker?.type !== 'html') return null;
+
+  const id = readBlockCarrierId(marker.value);
+  return id === null ? null : inflateBlock(id, ctx);
 }
 
 export function blocksToStorage(nodes: readonly RootContent[], ctx: ReverseContext): string {
@@ -341,7 +386,7 @@ export function blocksToStorage(nodes: readonly RootContent[], ctx: ReverseConte
 
     switch (node.type) {
       case 'paragraph':
-        output += `<p>${ctx.phrasing(node.children)}</p>`;
+        output += carriedBlockMacro(node.children, ctx) ?? `<p>${ctx.phrasing(node.children)}</p>`;
         break;
       case 'heading':
         output += `<h${String(node.depth)}>${ctx.phrasing(node.children)}</h${String(node.depth)}>`;

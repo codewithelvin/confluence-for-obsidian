@@ -209,10 +209,12 @@ export class ConfluenceClient implements ConfluenceGateway {
   /**
    * Uploads a file the note embeds but the page does not have (spec FR-8.6).
    *
-   * A name that already exists on the page becomes a new *version* of that
-   * attachment rather than a second file — which is Confluence's behaviour, not a
-   * choice made here, and why the push path checks first that the name it is about
-   * to use belongs to the file it means.
+   * Creation only. A name the page already holds is **refused with a 400**, not filed
+   * as a new version of that attachment — measured on 7.19.6 (2026-08-12), against the
+   * opposite claim this comment used to make. Replacing an attachment is a different
+   * endpoint (`POST .../child/attachment/{id}/data`), which nothing calls: FR-8.6
+   * uploads files that are *not yet* in Confluence, and `runUploads` refuses the
+   * collision rather than re-versioning a file it has no record of putting there.
    */
   async uploadAttachment(
     pageId: string,

@@ -5,6 +5,6 @@
     "xhtml": "<ac:structured-macro ac:name=\"toc\" ac:schema-version=\"1\"><ac:parameter ac:name=\"maxLevel\">3</ac:parameter></ac:structured-macro>",
     "type": "macro",
     "name": "toc",
-    "label": "toc macro — 3"
+    "label": "toc macro"
   }
 ]

@@ -1,4 +1,4 @@
-import { AppError, errorFromStatus, serverMessage } from '../util/errors';
+import { AppError, bodyOutline, errorFromStatus, serverMessage } from '../util/errors';
 import type { Logger } from '../util/logger';
 import { err, ok, type Result } from '../util/result';
 import { parsePaged, type Parser } from './api-types';
@@ -106,6 +106,57 @@ export function multipartBody(
     content: content.buffer,
     contentType: `multipart/form-data; boundary=${boundary}`,
   });
+}
+
+/**
+ * Identifies the plugin — and, more importantly, does not look like a browser.
+ *
+ * Left unset, Electron sends Obsidian's own `Mozilla/5.0 … Chrome/… Safari/…`, and
+ * Confluence reads that `Mozilla` prefix as "a browser is calling". Its XSRF filter then
+ * challenges the request and answers `XSRF check failed` as plain HTML *before*
+ * authentication or permissions are reached — and `X-Atlassian-Token: no-check` does not
+ * exempt it, which is what makes the failure so hard to read: it presents as a permission
+ * problem on a request that was never authenticated in the first place.
+ *
+ * Measured on 7.19.6 (2026-08-12) by replaying the captured Electron request: POSTs
+ * differing *only* in this header get the XSRF page with the browser agent and
+ * Confluence's own JSON answer without it. It cost `POST /rest/api/content` entirely —
+ * `PUT` and `DELETE` were unaffected, because the filter only guards `POST`, which is
+ * why update, reparent and delete all worked while creating a page never did.
+ *
+ * No version string: it would drift against `manifest.json` and nothing reads it.
+ */
+const USER_AGENT = 'confluence-dc-connector (Obsidian plugin)';
+
+/**
+ * Why a request was refused — parsed once, for both readers of that answer.
+ *
+ * Confluence's REST layer states its reason in a JSON `message`, and that reason is the
+ * only thing separating a rejected token, an instance that answers anonymous instead of
+ * 401, and a genuine space right: without it all three are a bare 403. A refusal
+ * carrying no such message did not come from that layer at all — an empty body or an
+ * HTML page means a servlet filter, a proxy or a WAF answered first — so the outline
+ * describes the body instead. That is the difference between "Confluence refused this"
+ * and "something in front of Confluence did", and the two have different remedies.
+ *
+ * `detail` feeds the typed error and `outline` feeds the log, from one parse, so the
+ * notice and the console can never disagree about what happened.
+ */
+function refusalReason(response: HttpResponse): {
+  readonly detail: string | null;
+  readonly outline: string;
+} {
+  const detail = serverMessage(response.text);
+  return {
+    detail,
+    outline:
+      detail ??
+      bodyOutline(
+        response.text,
+        headerValue(response.headers, 'content-type'),
+        response.bytes.byteLength,
+      ),
+  };
 }
 
 export class RequestRunner {
@@ -259,6 +310,7 @@ export class RequestRunner {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json, application/xml;q=0.9, */*;q=0.8',
       'X-Atlassian-Token': 'no-check',
+      'User-Agent': USER_AGENT,
       ...(body === undefined ? {} : { 'Content-Type': body.contentType }),
     };
 
@@ -280,22 +332,30 @@ export class RequestRunner {
 
       if (response.status >= 200 && response.status < 300) return ok(response);
 
+      // `warn`, not `debug`, so a refusal explains itself without debug logging having
+      // been switched on first. The logger redacts before anything reaches the console.
+      const refusal = refusalReason(response);
+      this.deps.logger.warn(
+        `${method} ${context} -> ${String(response.status)} — ${refusal.outline}`,
+      );
+
       // Retrying a bodied request is safe because a page update carries the
       // version it expects (FR-5.4): if the first attempt actually landed, the
       // retry comes back 409 and routes to the conflict flow rather than
-      // overwriting anything (FR-5.5). An attachment upload has no such guard,
-      // but it needs none: a second `POST` of the same file name creates a new
-      // *version* of that attachment rather than a duplicate, and FR-8.7 keeps
-      // the plugin from ever deleting either.
+      // overwriting anything (FR-5.5). An attachment upload carries no version,
+      // and `POST child/attachment` does *not* turn a repeated name into a new
+      // version — it answers 400 (measured on 7.19.6, 2026-08-12). That is
+      // survivable rather than dangerous, because only an HTTP *response* is
+      // retried: reaching here means Confluence answered 429 or 5xx and did not
+      // store the file, while a lost response is a transport failure and returns
+      // above without one. 400 is not retryable, so a genuine duplicate fails
+      // loudly instead of looping.
       const exhausted = attempt >= this.deps.retry.maxAttempts;
       if (exhausted || !isRetryableStatus(response.status)) {
-        // The body is already in hand, and for a refusal it is the only place the
-        // *reason* exists.
-        const detail = serverMessage(response.text);
         return err(
-          detail === null
+          refusal.detail === null
             ? errorFromStatus(response.status, context)
-            : errorFromStatus(response.status, context, detail),
+            : errorFromStatus(response.status, context, refusal.detail),
         );
       }
 

@@ -2,6 +2,8 @@ import type { BlockContent, Blockquote, Code, RootContent } from 'mdast';
 import { serialiseMacroParams } from './macro-params';
 import { makeBlockPlaceholder } from './placeholder-factory';
 import { BLOCK_FENCE_LANGUAGE, collapse } from './placeholder-registry';
+import { convertDiagramBlock, DIAGRAM_MACROS, macroLabel } from './storage-drawio';
+import { convertIncludeBlock, INCLUDE_MACROS } from './storage-include';
 import { acAttr, childrenOf, tagOf } from './storage-parser';
 import type { ConversionContext } from './types';
 
@@ -151,11 +153,12 @@ export function convertMacro(macro: Element, ctx: ConversionContext): RootConten
   if (name === 'code') return convertCodeMacro(macro, ctx);
   if (PANEL_MACROS.has(name)) return convertPanelMacro(macro, name, ctx);
   if (name === 'expand') return convertExpandMacro(macro, ctx);
+  if (DIAGRAM_MACROS.has(name)) return convertDiagramBlock(macro, name, ctx);
+  if (INCLUDE_MACROS.has(name)) return convertIncludeBlock(macro, name, ctx);
 
-  const summary = collapse(macro.textContent ?? '', 60);
   return makeBlockPlaceholder(ctx.placeholders, macro, {
     type: 'macro',
     name: name.length > 0 ? name : null,
-    label: summary.length > 0 ? `${name} macro — ${summary}` : `${name} macro`,
+    label: macroLabel(macro, name),
   });
 }

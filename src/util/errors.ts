@@ -109,6 +109,35 @@ export function serverMessage(body: string): string | null {
   }
 }
 
+/**
+ * A short, safe description of a refusal that carried no JSON `message`.
+ *
+ * Confluence's REST layer always states its reason in a JSON body. A refusal without
+ * one therefore did not come from that layer: an empty body or an HTML error page
+ * means a servlet filter, a reverse proxy or a WAF answered first, and that is a
+ * different problem from a permission with a different remedy. Naming which is worth
+ * far more than logging a bare status — a 403 alone is indistinguishable between a
+ * rejected token, an XSRF filter and a genuine space right.
+ *
+ * Collapsed and truncated because the body may be a full HTML page.
+ */
+export function bodyOutline(
+  body: string,
+  contentType: string | undefined,
+  byteLength?: number,
+): string {
+  const type = contentType === undefined ? 'untyped' : contentType.split(';')[0];
+  // The wire length separates "the server sent nothing" from "we failed to decode what
+  // it sent": an empty `text` beside a non-zero byte count is our transport losing the
+  // body, not a refusal that came without one. Those have opposite remedies.
+  const wire = byteLength === undefined ? '' : `, ${String(byteLength)} bytes on the wire`;
+  if (body.trim().length === 0) return `empty ${type} body${wire}`;
+
+  const collapsed = body.replace(/\s+/g, ' ').trim();
+  const shown = collapsed.length > 160 ? `${collapsed.slice(0, 160)}…` : collapsed;
+  return `${String(body.length)}-char ${type} body: ${shown}`;
+}
+
 /** Appends Confluence's own explanation, when it sent one. */
 function because(detail: string | undefined): string {
   return detail === undefined || detail.length === 0 ? '' : ` Confluence said: ${detail}`;

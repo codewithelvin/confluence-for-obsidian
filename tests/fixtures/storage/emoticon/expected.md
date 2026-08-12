@@ -1,1 +1,1 @@
-Nice `{cf:cfb-0001}`
+Nice ⭐<!--cf-emo:yellow-star-->

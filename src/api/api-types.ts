@@ -159,6 +159,24 @@ function malformed(what: string): AppError {
 export const parseUser: Parser<ConfluenceUser> = (raw) => {
   if (!isRecord(raw)) return err(malformed('the current user'));
 
+  // A rejected or absent token is not answered with 401 on every instance. Measured
+  // on 7.19.6 (2026-08-12): a nonsense bearer token returns 200 and an *anonymous*
+  // user, after which reads degrade silently — a space the account can see comes back
+  // 404 — and the first write answers 403 `Could not create content with type page`,
+  // which reads as a permission problem rather than as the authentication failure it
+  // is. Caught by name here so the remedy points at the token instead of at the
+  // space's permission screen.
+  if (asString(raw['type']) === 'anonymous') {
+    return err(
+      new AppError(
+        'AUTH_FAILED',
+        'Confluence answered as Anonymous, so it did not accept the token. Check that the ' +
+          'personal access token in settings is current and belongs to this instance.',
+        { action: 'open-settings' },
+      ),
+    );
+  }
+
   // Data Center reports `username`; some builds only populate `userKey`.
   const username = asNonEmptyString(raw['username']) ?? asNonEmptyString(raw['userKey']);
   if (username === null) return err(malformed('the current user'));

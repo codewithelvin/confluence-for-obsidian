@@ -187,6 +187,22 @@
 }
 
 /*
+ * The rebuilt child-page list (§6.4.11, FR-4.18).
+ *
+ * A plain disc list rather than the contents list's flat form: these are links to
+ * other notes, and the marker is what tells a reader so at a glance.
+ */
+.confluence-children {
+  margin: var(--size-4-2) 0;
+  padding-left: var(--size-4-5);
+}
+
+.confluence-children-item {
+  margin: 0;
+  line-height: var(--line-height-tight);
+}
+
+/*
  * The push and conflict dialogs (FR-5.2, FR-6.3).
  *
  * Every colour is an Obsidian variable (§7.4, FR-10.7): a diff whose added lines

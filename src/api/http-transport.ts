@@ -54,10 +54,20 @@ export function headerValue(
 export class ObsidianTransport implements HttpTransport {
   async send(request: HttpRequest): Promise<Result<HttpResponse, AppError>> {
     try {
+      // `contentType` is stated as well as sent in `headers`, because `requestUrl`
+      // treats it as a first-class field and settles the request's Content-Type from
+      // it — a header alone can be overridden by whatever Electron defaults a body to.
+      // Confluence cares: its XSRF filter admits `application/json` (a type no
+      // cross-origin form can produce) and challenges the CORS-simple types Electron
+      // falls back to, answering `XSRF check failed` before authentication is ever
+      // considered. Measured on 7.19.6, 2026-08-12.
+      const contentType = headerValue(request.headers, 'content-type');
+
       const response = await requestUrl({
         url: request.url,
         method: request.method,
         headers: { ...request.headers },
+        ...(contentType === undefined ? {} : { contentType }),
         ...(request.body === undefined ? {} : { body: request.body }),
         // Inspect the status rather than letting a 4xx throw, so it can be
         // mapped to a typed error with a user-facing message.

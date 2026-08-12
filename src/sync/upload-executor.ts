@@ -133,6 +133,15 @@ export function planUploads(
  * An upload that fails stops the push. The alternative is publishing a page whose
  * embed points at an attachment that is not there, and a broken image in a
  * corporate wiki is exactly the silent damage §1.2 forbids.
+ *
+ * The page's own listing is read first, because `POST child/attachment` creates and
+ * does not replace: a name the page already holds answers 400 (FR-8.6). Such a
+ * collision is one the *plan* could not see — recorded state carries no name that
+ * arrived by another route, and under `referencedOnly` an attachment no page body
+ * mentions was never recorded at all. It is refused rather than sent to
+ * `.../{id}/data`, on the same reasoning `planUploads` refuses a name it *can* see:
+ * re-versioning a file this plugin did not put there changes the picture for every
+ * page embedding it, and FR-8.7 means it could never be put back.
  */
 export async function runUploads(
   deps: UploadDeps,
@@ -140,6 +149,22 @@ export async function runUploads(
   plan: UploadPlan,
 ): Promise<Result<Readonly<Record<string, AttachmentState>>, AppError>> {
   if (plan.uploads.length === 0) return ok(plan.attachments);
+
+  const listed = await deps.client.listAttachments(pageId);
+  if (!listed.ok) return listed;
+
+  const held = new Set(listed.value.map((attachment) => attachment.filename));
+  const taken = plan.uploads.find((upload) => held.has(upload.filename));
+  if (taken !== undefined) {
+    return err(
+      new AppError(
+        'VAULT_WRITE_FAILED',
+        `This page already has an attachment called "${taken.filename}", which this plugin ` +
+          `did not upload. Rename "${taken.localPath}" before pushing, so the file already ` +
+          'in Confluence is not replaced.',
+      ),
+    );
+  }
 
   const attachments: Record<string, AttachmentState> = { ...plan.attachments };
 

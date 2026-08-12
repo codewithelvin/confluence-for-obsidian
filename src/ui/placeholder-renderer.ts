@@ -1,6 +1,7 @@
 import { BLOCK_FENCE_LANGUAGE, readInlinePlaceholderId } from '../convert/placeholder-registry';
 import { CONFLUENCE_KEY } from '../vault/frontmatter';
 import { asNonEmptyString, isRecord, readPath } from '../util/guards';
+import type { ChildPage } from './child-pages';
 
 /**
  * Rendering preserved Confluence content (spec FR-4.5).
@@ -143,11 +144,41 @@ export function renderTableOfContents(
   return true;
 }
 
+/**
+ * A real child-page list in place of the `children` macro (spec §6.4.11, D20).
+ *
+ * The sibling of `renderTableOfContents`, and for the same reason: the macro holds
+ * nothing to convert, because Confluence builds the list at render time from the
+ * page tree — which the vault mirrors. 57 pages across the mirror opened with a grey
+ * widget while their child notes sat in the same folder; `Backend Xəta Kodları` is
+ * one, and the macro is that page's entire body.
+ *
+ * `false` when there is nothing to list, so the caller falls back to the widget — a
+ * page with no children, or a macro refused for carrying a parameter that may point
+ * the list at a different page (`listsOwnChildren`).
+ */
+export function renderChildPages(parent: HTMLElement, children: readonly ChildPage[]): boolean {
+  if (children.length === 0) return false;
+
+  const list = parent.createEl('ul', { cls: 'confluence-children' });
+  for (const child of children) {
+    const item = list.createEl('li', { cls: 'confluence-children-item' });
+    // Same shape as the contents list above: `data-href` is what Obsidian's link
+    // handling reads, the class is what styles it. The extension comes off because
+    // that is the form Obsidian resolves and the form a user would have typed.
+    const link = item.createEl('a', { cls: 'internal-link', text: child.title });
+    const href = child.path.replace(/\.md$/, '');
+    link.setAttribute('href', href);
+    link.setAttribute('data-href', href);
+  }
+  return true;
+}
+
 export interface PlaceholderRendererDeps {
   /** Registers the code-block processor; `Plugin.registerMarkdownCodeBlockProcessor`. */
   readonly register: (
     language: string,
-    handler: (source: string, element: HTMLElement, sourcePath: string) => void,
+    handler: (source: string, element: HTMLElement, sourcePath: string) => void | Promise<void>,
   ) => void;
   /** Registers the inline processor; `Plugin.registerMarkdownPostProcessor`. */
   readonly registerInline: (
@@ -165,6 +196,18 @@ export interface PlaceholderRendererDeps {
   readonly labelsFor: (sourcePath: string) => Promise<ReadonlyMap<string, string>>;
   /** The note's own headings, for the `toc` macro to list. */
   readonly headingsFor: (sourcePath: string) => readonly NoteHeading[];
+  /**
+   * The child pages one `children` macro stands for (§6.4.11), empty where the
+   * vault cannot answer honestly.
+   *
+   * Per placeholder rather than per note, and asynchronous, because the decision
+   * needs the fragment's own source: a macro carrying a parameter may point the
+   * list at a different page, and the fence body does not say whether it does.
+   */
+  readonly childPagesFor: (
+    sourcePath: string,
+    placeholderId: string,
+  ) => Promise<readonly ChildPage[]>;
   readonly openExternal: (url: string) => void;
 }
 
@@ -233,13 +276,15 @@ export function renderPlaceholder(
   url: string | null,
   openExternal: (url: string) => void,
   headings: readonly NoteHeading[] = [],
+  childPages: readonly ChildPage[] = [],
 ): void {
   const fields = parsePlaceholderFields(source);
 
-  // A contents list is the one preserved construct Obsidian can rebuild from
-  // scratch, because it was never content in the first place — Confluence
-  // generates it from the page's headings, and the note has those too.
+  // Two preserved constructs Obsidian can rebuild from scratch, because neither was
+  // content in the first place: Confluence generates a contents list from the page's
+  // headings and a child list from the page tree, and the vault holds both (§6.4.11).
   if (fields.get('name') === 'toc' && renderTableOfContents(element, headings)) return;
+  if (fields.get('name') === 'children' && renderChildPages(element, childPages)) return;
 
   const widget = element.createDiv({ cls: 'confluence-placeholder' });
 
@@ -267,13 +312,23 @@ export function renderPlaceholder(
 }
 
 export function registerPlaceholderRenderer(deps: PlaceholderRendererDeps): void {
-  deps.register(BLOCK_FENCE_LANGUAGE, (source, element, sourcePath) => {
+  deps.register(BLOCK_FENCE_LANGUAGE, async (source, element, sourcePath) => {
+    const fields = parsePlaceholderFields(source);
+    // Only a `children` macro waits on the fragment sidecar. Every other widget —
+    // and there are 201 pages of `view-file` alone — must still render without a
+    // file read it has no use for.
+    const childPages =
+      fields.get('name') === 'children'
+        ? await deps.childPagesFor(sourcePath, fields.get('id') ?? '')
+        : [];
+
     renderPlaceholder(
       element,
       source,
       deps.pageUrlFor(sourcePath),
       deps.openExternal,
       deps.headingsFor(sourcePath),
+      childPages,
     );
   });
 

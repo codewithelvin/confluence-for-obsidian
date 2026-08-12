@@ -1,5 +1,7 @@
 import type { PhrasingContent, RootContent, Table, TableCell, TableRow } from 'mdast';
+import { hideEmoticonsIn } from './emoticons';
 import { makeBlockPlaceholder } from './placeholder-factory';
+import { hideTableMediaIn } from './table-media';
 import { acAttr, childrenOf, hasNamespacedMarkup, tagOf } from './storage-parser';
 import { FAITHFUL, serialiseElement, WHITESPACE_PRESERVING } from './storage-serialiser';
 import type { ConversionContext } from './types';
@@ -343,9 +345,16 @@ const NAMESPACED = 'table containing Confluence macros, images or links';
 /** A blank line the projection may not remove, so the table cannot be one block. */
 const UNSPLITTABLE = 'table containing preformatted text broken by a blank line';
 
-function tableAsHtml(table: Element): Projection {
+function tableAsHtml(table: Element, ctx: ConversionContext): Projection {
   const projected = table.cloneNode(true) as Element;
   if (!hideCommentAnchorsIn(projected)) return { reason: NAMESPACED };
+  // Before the namespaced check, not after: an emoticon is namespaced markup that
+  // Obsidian *can* show, and 20 tables in the mirror were opaque for no other
+  // reason (§6.4.9, D18).
+  if (!hideEmoticonsIn(projected)) return { reason: NAMESPACED };
+  // Same argument one layer down, and a far larger one: 260 tables on 148 pages
+  // hold an `ac:image` and nothing else worse (§6.4.10, D19).
+  if (!hideTableMediaIn(projected, ctx)) return { reason: NAMESPACED };
   if (hasNamespacedMarkup(projected)) return { reason: NAMESPACED };
   if (!removeBlankLines(projected, false)) return { reason: UNSPLITTABLE };
 
@@ -391,7 +400,7 @@ export function convertTable(table: Element, ctx: ConversionContext): RootConten
   if (analysed === null) {
     // GFM cannot hold it, but HTML usually can — and a visible table beats a
     // labelled widget hiding what is often the whole point of the page.
-    const projected = tableAsHtml(table);
+    const projected = tableAsHtml(table, ctx);
     return 'node' in projected
       ? projected.node
       : makeBlockPlaceholder(ctx.placeholders, table, {

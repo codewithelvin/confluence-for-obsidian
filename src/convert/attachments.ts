@@ -1,3 +1,5 @@
+import { diagramCandidates } from './storage-drawio';
+
 /**
  * Which attachments a page body refers to (spec FR-8.5).
  *
@@ -31,6 +33,13 @@ function decodeAttribute(value: string): string {
   return value.replace(/&(?:amp|lt|gt|quot|apos);/g, (entity) => ENTITIES.get(entity) ?? entity);
 }
 
+/**
+ * A diagram macro names its diagram in a parameter, not in `ri:filename`
+ * (spec FR-8.8, §6.4.8) — so the one pattern above cannot see it, and a page whose
+ * only attachment is a diagram would never even be listed.
+ */
+const DIAGRAM_NAME = /<ac:parameter ac:name="diagramName">([^<]*)<\/ac:parameter>/g;
+
 /** Every attachment file name the body refers to. */
 export function referencedAttachments(storage: string): ReadonlySet<string> {
   const names = new Set<string>();
@@ -38,6 +47,12 @@ export function referencedAttachments(storage: string): ReadonlySet<string> {
   for (const match of storage.matchAll(FILENAME)) {
     const filename = match[1];
     if (filename !== undefined) names.add(decodeAttribute(filename));
+  }
+
+  for (const match of storage.matchAll(DIAGRAM_NAME)) {
+    const diagramName = match[1];
+    if (diagramName === undefined) continue;
+    for (const candidate of diagramCandidates(decodeAttribute(diagramName))) names.add(candidate);
   }
   return names;
 }

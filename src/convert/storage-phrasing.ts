@@ -2,6 +2,9 @@ import type { PhrasingContent } from 'mdast';
 import { makeInlineClose, makeInlineOpen, makeInlinePlaceholder } from './placeholder-factory';
 import { CODE_SEPARATOR, collapse, readInlinePlaceholderId } from './placeholder-registry';
 import { acAttr, childrenOf, firstElement, riAttr, tagOf } from './storage-parser';
+import { emoticonCarrier, emoticonGlyph } from './emoticons';
+import { convertDiagramInline, DIAGRAM_MACROS, macroLabel } from './storage-drawio';
+import { convertIncludeInline, INCLUDE_MACROS } from './storage-include';
 import { convertImage } from './storage-images';
 import {
   FAITHFUL,
@@ -287,14 +290,49 @@ function convertSpan(element: Element, ctx: ConversionContext): PhrasingContent[
  * `ac:structured-macro: 250` in front of the reader, which says nothing about what
  * is missing (FR-4.5).
  */
+/**
+ * An emoticon, shown as the character it means (§6.4.9, D18, FR-4.15).
+ *
+ * Two nodes rather than one string: the glyph is ordinary text, and the carrier
+ * naming it is inline HTML. That is also the shape the note re-parses into, so the
+ * tree the forward pass builds and the tree the reverse pass reads are the same.
+ *
+ * An unmapped name, or an element carrying more than `ac:name`, keeps its
+ * placeholder — the glyph is never guessed, and an attribute is never dropped.
+ */
+function convertEmoticon(element: Element, ctx: ConversionContext): PhrasingContent[] {
+  const name = acAttr(element, 'name');
+  const glyph = name === null ? null : emoticonGlyph(name);
+
+  if (name === null || glyph === null || element.attributes.length !== 1) {
+    return [preserveUnknown(element, ctx)];
+  }
+
+  return [
+    { type: 'text', value: glyph },
+    { type: 'html', value: emoticonCarrier(name) },
+  ];
+}
+
 function preserveUnknown(element: Element, ctx: ConversionContext): PhrasingContent {
   const tag = tagOf(element);
   const macro = tag === 'ac:structured-macro' ? acAttr(element, 'name') : null;
 
+  // A diagram inside a paragraph is shown rather than named (§6.4.8, FR-4.13).
+  if (macro !== null && DIAGRAM_MACROS.has(macro)) {
+    return convertDiagramInline(element, macro, ctx);
+  }
+
+  // So is an included page (§6.4.12, FR-4.19). 93 of the mirror's 116 includes are
+  // here, sitting 2 to 5 in a paragraph that holds nothing else.
+  if (macro !== null && INCLUDE_MACROS.has(macro)) {
+    return convertIncludeInline(element, macro, ctx);
+  }
+
   return makeInlinePlaceholder(ctx.placeholders, element, {
     type: 'unsupported',
     name: macro ?? tag,
-    label: macro === null ? `${tag}: ${collapse(textOf(element), 40)}` : `${macro} macro`,
+    label: macro === null ? `${tag}: ${collapse(textOf(element), 40)}` : macroLabel(element, macro),
   });
 }
 
@@ -333,6 +371,8 @@ export function convertPhrasingElement(
       return convertAcLink(element, ctx);
     case 'ac:image':
       return convertImage(element, ctx);
+    case 'ac:emoticon':
+      return convertEmoticon(element, ctx);
     case 'time':
       return makeInlinePlaceholder(ctx.placeholders, element, {
         type: 'date',

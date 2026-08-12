@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AppError,
+  bodyOutline,
   errorFromStatus,
   errorFromTransportFailure,
   isAppError,
@@ -146,5 +147,48 @@ describe("Confluence's own explanation (§6.8)", () => {
 
   it('says nothing extra when Confluence sent no explanation', () => {
     expect(errorFromStatus(403, '/rest/api/content').userMessage).not.toContain('Confluence said');
+  });
+});
+
+describe('outlining a refusal that carried no JSON message', () => {
+  // Confluence's REST layer always states its reason in JSON. A refusal without one
+  // came from somewhere earlier — a servlet filter, a proxy, a WAF — and that is a
+  // different problem with a different remedy, so the log has to be able to say so.
+
+  it('names an empty body and its content type', () => {
+    expect(bodyOutline('', 'text/html;charset=UTF-8')).toBe('empty text/html body');
+    expect(bodyOutline('   \n  ', undefined)).toBe('empty untyped body');
+  });
+
+  it('reports the wire length, which separates a silent server from a lost body', () => {
+    // An empty `text` beside a non-zero byte count is the transport dropping the body,
+    // not a refusal that arrived without one — and the two have opposite remedies.
+    expect(bodyOutline('', 'application/json', 412)).toBe(
+      'empty application/json body, 412 bytes on the wire',
+    );
+    expect(bodyOutline('', 'application/json', 0)).toBe(
+      'empty application/json body, 0 bytes on the wire',
+    );
+  });
+
+  it('shows the start of an HTML error page, collapsed to one line', () => {
+    const page = '<html>\n  <body>\n    XSRF check failed\n  </body>\n</html>';
+
+    const outline = bodyOutline(page, 'text/html');
+
+    expect(outline).toContain('text/html');
+    expect(outline).toContain('XSRF check failed');
+    expect(outline).not.toContain('\n');
+  });
+
+  it('reports the true length even when the shown text is truncated', () => {
+    const outline = bodyOutline('z'.repeat(500), 'application/json');
+
+    expect(outline).toContain('500-char');
+    expect(outline.endsWith('…')).toBe(true);
+  });
+
+  it('drops the charset, which is never the interesting part', () => {
+    expect(bodyOutline('nope', 'application/json;charset=UTF-8')).toContain('application/json ');
   });
 });

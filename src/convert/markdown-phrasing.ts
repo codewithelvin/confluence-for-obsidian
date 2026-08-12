@@ -1,4 +1,5 @@
 import type { Image, Link, PhrasingContent } from 'mdast';
+import { emoticonElement, emoticonGlyph, readEmoticonName } from './emoticons';
 import {
   CODE_SEPARATOR,
   readCarriedImageId,
@@ -275,6 +276,14 @@ function htmlToStorage(
   previous: PhrasingContent | undefined,
   ctx: ReverseContext,
 ): string {
+  const emoticon = readEmoticonName(value);
+  if (emoticon !== null) {
+    // Normally the text in front has already taken it. When that text no longer
+    // ends in the glyph the user deleted the character and left the carrier, and
+    // the emoticon goes back on its own rather than vanishing from the page.
+    return endsInGlyph(previous, emoticon) ? '' : emoticonElement(emoticon);
+  }
+
   const carried = readCarriedImageId(value);
   if (carried === null) return value;
   if (endsInEmbed(previous)) return '';
@@ -284,6 +293,31 @@ function htmlToStorage(
   // image survives an edit that only looked like a deletion, and a real deletion
   // still shows up in the push diff.
   return inflateById(carried, ctx);
+}
+
+/** Whether the text before a carrier still ends in the glyph that carrier names. */
+function endsInGlyph(node: PhrasingContent | undefined, name: string): boolean {
+  const glyph = emoticonGlyph(name);
+  return node?.type === 'text' && glyph !== null && node.value.endsWith(glyph);
+}
+
+/**
+ * The emoticon a text node's trailing glyph stands for, with the glyph removed.
+ *
+ * `null` when the next node is not a carrier, or when the text no longer ends in
+ * the right glyph — a user who typed ✅ of their own accord keeps it as text.
+ */
+function trailingEmoticon(
+  value: string,
+  next: PhrasingContent | undefined,
+): { readonly text: string; readonly name: string } | null {
+  if (next?.type !== 'html') return null;
+
+  const name = readEmoticonName(next.value);
+  const glyph = name === null ? null : emoticonGlyph(name);
+  if (name === null || glyph === null || !value.endsWith(glyph)) return null;
+
+  return { text: value.slice(0, value.length - glyph.length), name };
 }
 
 /** The source to put back in place of a text node's last embed, if one is marked. */
@@ -314,6 +348,26 @@ function isCodeSeparator(nodes: readonly PhrasingContent[], index: number): bool
   return before !== undefined && before === after && AMBIGUOUS_WHEN_ADJACENT.has(before);
 }
 
+/**
+ * A text node, and whichever carrier the node after it turns out to be.
+ *
+ * Two carriers end up here because both describe something *inside* this text
+ * rather than a node of their own: an emoticon's glyph, and the embed a
+ * carried-image marker follows.
+ */
+function textNodeToStorage(
+  node: PhrasingContent & { type: 'text' },
+  next: PhrasingContent | undefined,
+  ctx: ReverseContext,
+): string {
+  const emoticon = trailingEmoticon(node.value, next);
+  if (emoticon !== null) {
+    return textToStorage(emoticon.text, ctx) + emoticonElement(emoticon.name);
+  }
+
+  return textToStorage(node.value, ctx, carriedSource(next, node, ctx));
+}
+
 export function phrasingToStorage(nodes: readonly PhrasingContent[], ctx: ReverseContext): string {
   let output = '';
 
@@ -321,13 +375,9 @@ export function phrasingToStorage(nodes: readonly PhrasingContent[], ctx: Revers
     if (isCodeSeparator(nodes, index)) continue;
 
     switch (node.type) {
-      case 'text': {
-        // A carried-image marker describes the embed in front of it, so the text
-        // holding that embed is where its source goes back in.
-        const carried = carriedSource(nodes[index + 1], node, ctx);
-        output += textToStorage(node.value, ctx, carried);
+      case 'text':
+        output += textNodeToStorage(node, nodes[index + 1], ctx);
         break;
-      }
       case 'strong':
         output += wrap('strong', node.children, ctx);
         break;
