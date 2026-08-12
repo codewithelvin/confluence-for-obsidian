@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-08-12
+
+### Fixed
+
+- The release is published as a normal release rather than a GitHub prerelease, so
+  Obsidian can find and distribute it. A prerelease is omitted from
+  `/releases/latest`, which answered 404 while two releases were published, and the
+  plugin directory rejected the submission with "No release matches your manifest
+  version" even though the manifest, the tag and the assets all agreed. Only a tag
+  carrying a suffix, such as `0.1.0-beta`, is a prerelease now.
+
 ## [0.0.2] - 2026-08-12
 
 ### Changed
@@ -111,6 +122,7 @@ in one space. Treat it as a beta until a second server has confirmed them.
 - An `include` macro becomes an embed of the note it names, so the included page's
   content is visible in place, as it is in Confluence.
 
-[Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/compare/0.0.2...main
+[Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/compare/0.0.3...main
+[0.0.3]: https://github.com/codewithelvin/confluence-for-obsidian/releases/tag/0.0.3
 [0.0.2]: https://github.com/codewithelvin/confluence-for-obsidian/releases/tag/0.0.2
 [0.0.1]: https://github.com/codewithelvin/confluence-for-obsidian/releases/tag/0.0.1

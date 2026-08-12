@@ -103,10 +103,18 @@ jobs:
           TAG: ${{ github.ref_name }}
           NOTES_SOURCE: ${{ steps.notes.outputs.source }}
         run: |
-          # A prerelease while the version is still 0.x: the README calls this a beta
-          # and a release badge saying otherwise would contradict it.
+          # Only a tag that carries a pre-release suffix is marked as one. `0.x` must
+          # NOT be: GitHub omits prereleases from `/releases/latest`, so that endpoint
+          # answered 404 with two releases plainly published, and Obsidian's submission
+          # scanner refused the plugin with "No release matches your manifest version"
+          # while the manifest, the tag and the three assets all agreed. The previous
+          # rule marked every 0.x a prerelease to match the README calling this a beta
+          # — an honest badge that made the release undistributable.
+          #
+          # A build genuinely not meant for the directory gets a suffixed tag
+          # (`0.1.0-beta`), which is BRAT's channel. That is what `--prerelease` is for.
           case "$TAG" in
-            0.*|*-*) prerelease="--prerelease" ;;
+            *-*) prerelease="--prerelease" ;;
             *) prerelease="" ;;
           esac
 
