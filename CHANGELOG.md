@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-08-12
+
+First public build, released as a prerelease: every milestone is present, and the
+write paths have been exercised against one Confluence Data Center 7.19.6 server
+in one space. Treat it as a beta until a second server has confirmed them.
+
 ### Added
 
 - Project skeleton: TypeScript strict build via esbuild, ESLint with enforced
@@ -79,5 +85,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A write whose path would exceed the 240-character budget is refused with a typed
   `PATH_TOO_LONG` error naming the remedy, rather than failing with the operating
   system's own unreadable error.
+- Draw.io diagrams appear in the note as the picture Confluence shows. The macro
+  holds only a name, so the diagram is found as the page attachment that backs its
+  preview. Editing one is refused rather than deferred: the drawing itself lives in
+  the app, and a push from here would leave every Confluence reader on a stale
+  image.
+- Emoticons become their Unicode character instead of an opaque placeholder, over
+  the 16 names that have an honest glyph.
+- A table too complex to become Markdown is preserved as HTML, and the images and
+  attachment links inside it now render there too, in both editing modes, rather
+  than being reduced to placeholders with the rest of the table.
+- The `children` and `toc` macros are rebuilt from the vault when the note is
+  displayed, so the navigation Confluence generates is present and its links go to
+  the mirrored notes. Only the parameterless form is rebuilt; anything naming
+  another page stays a placeholder.
+- An `include` macro becomes an embed of the note it names, so the included page's
+  content is visible in place, as it is in Confluence.
 
-[Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/commits/main
+[Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/compare/0.0.1...main
+[0.0.1]: https://github.com/codewithelvin/confluence-for-obsidian/releases/tag/0.0.1
