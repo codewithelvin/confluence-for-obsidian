@@ -111,9 +111,13 @@ export class Logger {
     const safeArgs = args.map(redactValue);
 
     switch (level) {
+      // `console.debug`, not `console.log`: this channel is diagnostic, it is off
+      // unless the user turns debug logging on, and a devtools console hides it by
+      // default. Obsidian's review asks plugins not to log routinely — `warn` and
+      // `error` below stay on the channels a reader is meant to see.
       case 'debug':
       case 'info':
-        console.log(prefix, safeMessage, ...safeArgs);
+        console.debug(prefix, safeMessage, ...safeArgs);
         break;
       case 'warn':
         console.warn(prefix, safeMessage, ...safeArgs);

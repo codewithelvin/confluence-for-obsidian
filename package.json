@@ -1,6 +1,6 @@
 {
   "name": "confluence-dc-connector",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Mirror Confluence Data Center pages into an Obsidian vault as Markdown, edit locally, push back.",
   "private": true,
   "license": "MIT",

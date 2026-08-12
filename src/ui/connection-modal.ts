@@ -85,7 +85,7 @@ export class ConnectionModal extends Modal {
       );
 
     new Setting(contentEl)
-      .setName('Personal Access Token')
+      .setName('Personal access token')
       .setDesc(
         this.initial.hasStoredToken === true
           ? 'A token is already stored. Leave blank to keep it.'
@@ -137,7 +137,7 @@ export class ConnectionModal extends Modal {
     }
 
     if (this.token.trim().length === 0 && this.initial.hasStoredToken !== true) {
-      new Notice('Enter a Personal Access Token.');
+      new Notice('Enter a personal access token.');
       return;
     }
 

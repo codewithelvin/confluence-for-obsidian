@@ -10,8 +10,12 @@ on:
       - '[0-9]+.[0-9]+.[0-9]+'
       - '[0-9]+.[0-9]+.[0-9]+-*'
 
+# `id-token` and `attestations` exist for the provenance step below, which needs to
+# mint an OIDC token to sign with. `contents` is what publishes the release.
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -55,6 +59,19 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # Signed provenance for the three files Obsidian downloads, so anyone can prove
+      # they were built by this workflow from this commit rather than uploaded by hand:
+      #   gh attestation verify main.js --repo codewithelvin/confluence-for-obsidian
+      # Attesting here, immediately after the build, means the bytes signed are the
+      # bytes uploaded — attesting after packaging would sign the zip's copies instead.
+      - name: Attest the release assets
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
 
       # Two forms, because two kinds of installer want different things. The three
       # loose files are what Obsidian's community catalogue and BRAT fetch, by name,

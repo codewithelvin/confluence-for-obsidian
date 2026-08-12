@@ -72,7 +72,7 @@ describe('ConnectionModal', () => {
     click(buttonsOf(modal.contentEl), 'Save');
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(Notice.shown[0]).toContain('Personal Access Token');
+    expect(Notice.shown[0]).toContain('personal access token');
   });
 
   it('accepts a blank token when one is already stored', () => {

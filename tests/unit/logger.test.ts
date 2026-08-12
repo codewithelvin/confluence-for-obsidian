@@ -97,12 +97,12 @@ describe('redactValue', () => {
 });
 
 describe('Logger', () => {
-  let logSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   });
@@ -114,12 +114,12 @@ describe('Logger', () => {
 
   it('suppresses debug output when debug logging is off', () => {
     new Logger('test', () => false).debug('hidden');
-    expect(logSpy).not.toHaveBeenCalled();
+    expect(debugSpy).not.toHaveBeenCalled();
   });
 
   it('emits debug output when debug logging is on', () => {
     new Logger('test', () => true).debug('shown');
-    expect(logSpy).toHaveBeenCalledOnce();
+    expect(debugSpy).toHaveBeenCalledOnce();
   });
 
   it('re-reads the debug flag on every call', () => {
@@ -128,15 +128,18 @@ describe('Logger', () => {
     logger.debug('first');
     enabled = true;
     logger.debug('second');
-    expect(logSpy).toHaveBeenCalledOnce();
+    expect(debugSpy).toHaveBeenCalledOnce();
   });
 
+  // `info` reaches the console on the debug channel, which a devtools console hides
+  // by default — Obsidian's review asks plugins not to log routinely, and `warn` and
+  // `error` are the two levels a reader is meant to see.
   it('emits info, warn and error regardless of the debug flag', () => {
     const logger = new Logger('test', () => false);
     logger.info('i');
     logger.warn('w');
     logger.error('e');
-    expect(logSpy).toHaveBeenCalledOnce();
+    expect(debugSpy).toHaveBeenCalledOnce();
     expect(warnSpy).toHaveBeenCalledOnce();
     expect(errorSpy).toHaveBeenCalledOnce();
   });
@@ -152,16 +155,16 @@ describe('Logger', () => {
 
   it('prefixes output with its scope', () => {
     new Logger('sync', () => true).info('message');
-    expect(logSpy.mock.calls[0]?.[0]).toBe('[confluence-dc:sync]');
+    expect(debugSpy.mock.calls[0]?.[0]).toBe('[confluence-dc:sync]');
   });
 
   it('composes scopes for child loggers', () => {
     new Logger('sync', () => true).child('pull').info('message');
-    expect(logSpy.mock.calls[0]?.[0]).toBe('[confluence-dc:sync:pull]');
+    expect(debugSpy.mock.calls[0]?.[0]).toBe('[confluence-dc:sync:pull]');
   });
 
   it('inherits the debug flag in child loggers', () => {
     new Logger('sync', () => true).child('pull').debug('message');
-    expect(logSpy).toHaveBeenCalledOnce();
+    expect(debugSpy).toHaveBeenCalledOnce();
   });
 });

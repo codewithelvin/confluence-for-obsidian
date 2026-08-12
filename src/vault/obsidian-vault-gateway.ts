@@ -47,7 +47,7 @@ const BATCH_SIZE = 25;
 
 function nextTick(): Promise<void> {
   return new Promise((resolve) => {
-    setTimeout(resolve, 0);
+    window.setTimeout(resolve, 0);
   });
 }
 

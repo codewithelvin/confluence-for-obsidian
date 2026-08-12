@@ -15,8 +15,11 @@ export interface Scheduler {
   random(): number;
 }
 
+// `window.setTimeout`, not the bare global: Obsidian's guidance is that a timer
+// started from a popout window must belong to that window, and the bare call can
+// bind to the wrong one.
 export const realScheduler: Scheduler = {
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
   random: () => Math.random(),
 };
 

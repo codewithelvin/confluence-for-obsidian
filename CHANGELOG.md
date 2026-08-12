@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-08-12
+
+### Fixed
+
+- `minAppVersion` is now **1.7.2**, the version the plugin actually needs. It claimed
+  `1.5.3` while calling four APIs added later — `Vault.getFileByPath` and
+  `Vault.getFolderByPath` (1.5.7), `FileManager.trashFile` (1.6.6) and
+  `Workspace.revealLeaf` (1.7.2) — because the `obsidian` typings are pinned at 1.13.1,
+  so the calls typechecked against a floor that does not have them. `versions.json` is
+  corrected for the earlier releases too: they have the same floor, and an install on
+  1.5.3 would otherwise be offered a build that fails on its first vault read.
+- Timers start through `window.setTimeout`, so a timer belongs to the window that
+  started it rather than possibly to the main one — the case that matters in a popout.
+
+### Added
+
+- Release assets carry signed build provenance, so anyone can verify a download was
+  built by the release workflow from this repository rather than uploaded by hand:
+  `gh attestation verify main.js --repo codewithelvin/confluence-for-obsidian`.
+
+### Changed
+
+- Diagnostic logging uses the console's debug channel instead of `log`, so normal
+  operation leaves the console quiet while warnings and errors still show.
+- Sentence case for UI text: "Personal access token", and the `Root page ID` field's
+  placeholder.
+
 ## [0.0.3] - 2026-08-12
 
 ### Fixed
@@ -122,7 +149,8 @@ in one space. Treat it as a beta until a second server has confirmed them.
 - An `include` macro becomes an embed of the note it names, so the included page's
   content is visible in place, as it is in Confluence.
 
-[Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/compare/0.0.3...main
+[Unreleased]: https://github.com/codewithelvin/confluence-for-obsidian/compare/0.0.4...main
+[0.0.4]: https://github.com/codewithelvin/confluence-for-obsidian/releases/tag/0.0.4
 [0.0.3]: https://github.com/codewithelvin/confluence-for-obsidian/releases/tag/0.0.3
 [0.0.2]: https://github.com/codewithelvin/confluence-for-obsidian/releases/tag/0.0.2
 [0.0.1]: https://github.com/codewithelvin/confluence-for-obsidian/releases/tag/0.0.1

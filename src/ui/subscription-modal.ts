@@ -118,7 +118,7 @@ export class SubscriptionModal extends Modal {
       .setName('Root page ID')
       .setDesc('Leave empty to mirror the whole space, or paste a page ID to mirror its subtree.')
       .addText((text) =>
-        text.setPlaceholder('optional').onChange((value) => {
+        text.setPlaceholder('Optional').onChange((value) => {
           this.rootPageId = value.trim();
         }),
       );

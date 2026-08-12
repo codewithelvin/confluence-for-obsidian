@@ -91,7 +91,7 @@ export interface PushProgress {
 /** Hands the main thread back between pages so the UI stays inside the §7.1 budget. */
 function yieldToUi(): Promise<void> {
   return new Promise((resolve) => {
-    setTimeout(resolve, 0);
+    window.setTimeout(resolve, 0);
   });
 }
 
