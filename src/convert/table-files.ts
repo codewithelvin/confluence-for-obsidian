@@ -35,6 +35,20 @@ function isFileMacro(element: Element): boolean {
 }
 
 /**
+ * A file name standing in for content that could not be shown.
+ *
+ * Shared with §6.4.10's images, because the judgement is the same one and there is no
+ * reason for a reader to meet two spellings of it: the cell says which file belongs
+ * there, and the reverse pass has one pattern to read rather than two.
+ */
+export function standInName(document: Document, filename: string): Element {
+  const named = document.createElement('span');
+  named.setAttribute('class', NAME_CLASS);
+  named.appendChild(document.createTextNode(filename));
+  return named;
+}
+
+/**
  * The element that shows a document-preview macro, or `null` when it names no file.
  *
  * A link where the file is on disk, and the bare name where it is not. Naming no file
@@ -48,12 +62,7 @@ function fileElement(element: Element, ctx: ConversionContext): Element | null {
   const document = element.ownerDocument;
   const path = ctx.resolveAttachment?.(filename) ?? null;
 
-  if (path === null || path.length === 0) {
-    const named = document.createElement('span');
-    named.setAttribute('class', NAME_CLASS);
-    named.appendChild(document.createTextNode(filename));
-    return named;
-  }
+  if (path === null || path.length === 0) return standInName(document, filename);
 
   const anchor = document.createElement('a');
   anchor.setAttribute('href', attachmentUrl(path));

@@ -143,6 +143,26 @@ describe('a document-preview macro inside a preserved table', () => {
     expect(convert(formsTable(toc))).toContain('```confluence-block');
   });
 
+  it('stands in for a picture that is not on disk, keeping the table (§6.4.10)', () => {
+    // Page 38549656: two of one table's three pictures are missing, and D19's
+    // all-or-nothing rule hid a nineteen-row specification of screen elements over it.
+    const image = (name: string): string =>
+      `<ac:image><ri:attachment ri:filename="${name}"/></ac:image>`;
+    const storage = formsTable(image('dəyişiklik (2).docx'), image('gone.jpg'));
+    const markdown = convert(storage);
+
+    expect(markdown).toContain('<img src=');
+    expect(markdown).toContain('<span class="cf-file">gone.jpg</span>');
+    expect(markdown).not.toContain('```confluence-block');
+    expect(push(markdown, storage)).toBe(storage);
+  });
+
+  it('still refuses a table whose external image the scheme allowlist rejects', () => {
+    // §7.4's gate is about safety, not availability, and has no file name to show.
+    const storage = formsTable('<ac:image><ri:url ri:value="javascript:alert(1)"/></ac:image>');
+    expect(convert(storage)).toContain('```confluence-block');
+  });
+
   it('leaves a styled span the author wrote alone', () => {
     // The reverse pattern requires the `cf-file` class, so an author's span cannot be
     // swallowed into a fragment that never described it. A *bare* `<span>` never

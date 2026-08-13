@@ -155,14 +155,20 @@ describe('a table refused only for its emoticons', () => {
     expect(result.certified, result.detail ?? '').toBe(true);
   });
 
-  it('is still refused when a cell also holds an image', () => {
+  it('converts alongside an image, which D19 and §6.4.17 have since taken on', () => {
+    // Written when this decision shipped, before D19 taught a preserved table to show
+    // its pictures — and it kept passing only because the file was not on disk, which
+    // §6.4.17 now stands in for by name rather than refusing the table over it.
     const withImage =
       '<table><tbody>' +
       '<tr><th>Column</th><th>Icon</th></tr>' +
       '<tr><td rowspan="2">Name</td><td><ac:emoticon ac:name="tick"/></td></tr>' +
       '<tr><td><ac:image ac:width="30"><ri:attachment ri:filename="b.png"/></ac:image></td></tr>' +
       '</tbody></table>';
-    expect(markdownOf(withImage)).toContain('confluence-block');
+
+    const markdown = markdownOf(withImage);
+    expect(markdown).not.toContain('confluence-block');
+    expect(markdown).toContain('<span class="cf-file">b.png</span>');
   });
 
   it('is still refused when one of its emoticons is unmapped', () => {

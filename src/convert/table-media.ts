@@ -1,6 +1,6 @@
 import { preserveBeside } from './placeholder-factory';
 import { childrenOf, firstElement, riAttr, tagOf } from './storage-parser';
-import { PROJECTED_TABLE_FILE } from './table-files';
+import { PROJECTED_TABLE_FILE, standInName } from './table-files';
 import { PROJECTED_TASK_LIST } from './table-tasks';
 import type { ConversionContext, ReverseContext } from './types';
 
@@ -87,7 +87,22 @@ function imageElement(element: Element, ctx: ConversionContext): Element | null 
   if (resource === null) return null;
 
   const source = imageSource(resource, ctx);
-  if (source === null) return null;
+  if (source === null) {
+    // An attachment that is not on disk stands in as its own name rather than refusing
+    // the table — §6.4.17's judgement, and the same one: the rule below is there so a
+    // half-translated table cannot show a *gap*, and a file name in text is not a gap.
+    // Page 38549656 is the case: two of one table's three pictures are missing, and
+    // refusing on them hid a nineteen-row specification of screen elements.
+    //
+    // Only for a named attachment. An `<ri:url>` whose scheme §7.4 refuses has no name
+    // to show and must not be softened into one — that gate is about safety, not about
+    // availability.
+    const filename = riAttr(resource, 'filename');
+    if (tagOf(resource) !== 'ri:attachment' || filename === null || filename.length === 0) {
+      return null;
+    }
+    return standInName(element.ownerDocument, filename);
+  }
 
   const image = element.ownerDocument.createElement('img');
   image.setAttribute('src', source);

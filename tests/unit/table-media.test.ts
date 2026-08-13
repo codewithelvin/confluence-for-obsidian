@@ -166,9 +166,11 @@ describe('what still refuses the table', () => {
     expect(convert(preservedTable(missing))).toContain('confluence-block');
   });
 
-  it('an image whose file is not on disk', () => {
-    const missing = '<ac:image><ri:attachment ri:filename="never downloaded.png"/></ac:image>';
-    expect(convert(preservedTable(missing))).toContain('confluence-block');
+  it('an external image whose scheme §7.4 refuses', () => {
+    // Unlike a missing attachment, this gate is about *safety* rather than
+    // availability, and there is no file name to stand in for the picture.
+    const unsafe = '<ac:image><ri:url ri:value="javascript:alert(1)"/></ac:image>';
+    expect(convert(preservedTable(unsafe))).toContain('confluence-block');
   });
 
   it('a page link, which is O19 and not this decision', () => {
@@ -187,13 +189,15 @@ describe('what still refuses the table', () => {
     expect(convert(preservedTable(macro))).toContain('confluence-block');
   });
 
-  it('one bad image among good ones — all or nothing, never half a table', () => {
-    // A table half-translated would show a gap exactly where FR-4.9 says it must
-    // not, so one unshowable image refuses the whole thing.
+  it('one unshowable element among good ones — all or nothing, never half a table', () => {
+    // A table half-translated would show a gap exactly where FR-4.9 says it must not,
+    // so one unshowable element refuses the whole thing. A *missing attachment* is no
+    // longer such an element — §6.4.17 stands its name in, because a name in text is
+    // not a gap — so the case is now a page link, which has nothing to stand in with.
     const mixed =
       '<table><tbody>' +
       '<tr><th>a</th><th>b</th></tr>' +
-      `<tr><td rowspan="2">${BUTTON}</td><td><ac:image><ri:attachment ri:filename="missing.png"/></ac:image></td></tr>` +
+      `<tr><td rowspan="2">${BUTTON}</td><td><ac:link><ri:page ri:content-title="X"/></ac:link></td></tr>` +
       '<tr><td>x</td></tr>' +
       '</tbody></table>';
 
@@ -202,9 +206,24 @@ describe('what still refuses the table', () => {
   });
 
   it('burns no fragment id on its way to being refused', () => {
-    // The projection is planned in full before anything is allocated. Allocating
-    // as it went would leave the refused table's half-finished work in the
-    // fragment cache and push every later placeholder on the page up a number.
+    // The projection is planned in full before anything is allocated. Allocating as it
+    // went would leave the refused table's half-finished work in the fragment cache and
+    // push every later placeholder on the page up a number — which is what
+    // `rollbackTo` is for, and this is the case that exercises it: the image *is*
+    // projected, and then a later gate refuses the table anyway.
+    const mixed =
+      '<table><tbody>' +
+      '<tr><th>a</th><th>b</th></tr>' +
+      `<tr><td rowspan="2">${BUTTON}</td><td><ac:link><ri:page ri:content-title="X"/></ac:link></td></tr>` +
+      '<tr><td>x</td></tr>' +
+      '</tbody></table>';
+
+    expect(convert(mixed)).toContain('id: cfb-0001');
+  });
+
+  it('shows a missing picture as its name, rather than hiding the table (§6.4.17)', () => {
+    // Page 38549656: two of one table's three pictures are missing, and refusing on
+    // them hid a nineteen-row specification of screen elements.
     const mixed =
       '<table><tbody>' +
       '<tr><th>a</th><th>b</th></tr>' +
@@ -212,7 +231,10 @@ describe('what still refuses the table', () => {
       '<tr><td>x</td></tr>' +
       '</tbody></table>';
 
-    expect(convert(mixed)).toContain('id: cfb-0001');
+    const markdown = convert(mixed);
+    expect(markdown).toContain('<img');
+    expect(markdown).toContain('<span class="cf-file">missing.png</span>');
+    expect(markdown).not.toContain('confluence-block');
   });
 });
 
