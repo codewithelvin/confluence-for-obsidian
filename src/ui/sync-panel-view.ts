@@ -237,6 +237,16 @@ function renderReport(parent: HTMLElement, report: SyncReport, orphans: OrphanAc
     'Could not be given a valid path',
     report.unmappable.map((page) => `${page.title} — ${page.reason}`),
   );
+  // Collected since M4 and never shown, which is how a page displaying five of its
+  // seventeen screenshots came to look identical to one whose download had not
+  // finished. Both reasons a file can be absent are worth reading: over the size limit
+  // is a setting the user controls, and missing from Confluence is damage they can
+  // repair at the source, after which the picture appears with no change here (FR-8.9).
+  renderList(
+    parent,
+    'Attachments not downloaded',
+    report.skippedAttachments.map((item) => `${item.filename} — ${item.reason}`),
+  );
   renderList(
     parent,
     'Failed',

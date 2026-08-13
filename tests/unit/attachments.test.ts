@@ -142,17 +142,17 @@ describe('which attachments a body refers to (FR-8.5)', () => {
       '<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name">' +
       '<ri:attachment ri:filename="spec.docx"/></ac:parameter></ac:structured-macro>';
 
-    expect([...referencedAttachments(storage)].sort()).toEqual(['a.png', 'spec.docx']);
+    expect([...referencedAttachments(storage).all].sort()).toEqual(['a.png', 'spec.docx']);
   });
 
   it('decodes the entities an attribute value can carry', () => {
     const storage = '<ac:image><ri:attachment ri:filename="a &amp; b.png"/></ac:image>';
 
-    expect([...referencedAttachments(storage)]).toEqual(['a & b.png']);
+    expect([...referencedAttachments(storage).all]).toEqual(['a & b.png']);
   });
 
   it('finds nothing in a body with no attachments', () => {
-    expect(referencedAttachments('<p>Just prose.</p>').size).toBe(0);
+    expect(referencedAttachments('<p>Just prose.</p>').all.size).toBe(0);
   });
 });
 

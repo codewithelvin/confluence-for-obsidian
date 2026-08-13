@@ -172,7 +172,7 @@ describe('finding the preview to download (FR-8.8)', () => {
   it('puts them in the referenced set, so a diagram-only page is still listed', () => {
     // Without this the page is skipped before its attachments are ever listed,
     // and FR-4.13 has nothing on disk to embed.
-    expect([...referencedAttachments(drawio('Cancel'))]).toEqual([
+    expect([...referencedAttachments(drawio('Cancel')).all]).toEqual([
       'Cancel.png',
       'Cancel.drawio.png',
       'Cancel',
@@ -182,7 +182,7 @@ describe('finding the preview to download (FR-8.8)', () => {
   it('still finds an ordinary ri:filename alongside a diagram', () => {
     const both = `<p><ac:image><ri:attachment ri:filename="a.png"/></ac:image></p>${drawio('D')}`;
 
-    expect([...referencedAttachments(both)].sort()).toEqual([
+    expect([...referencedAttachments(both).all].sort()).toEqual([
       'D',
       'D.drawio.png',
       'D.png',

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { syncAttachments, type AttachmentDeps } from '../../src/sync/attachment-executor';
+import type { ReferencedAttachments } from '../../src/convert/attachments';
 import type { AttachmentState } from '../../src/sync/sync-state';
 import { AppError } from '../../src/util/errors';
 import { Logger } from '../../src/util/logger';
@@ -42,7 +43,19 @@ function listed(size: number | null = 512, version = 1): void {
   ]);
 }
 
-const REFERENCED = new Set(['a.png']);
+/**
+ * What a body referred to, as the downloader is given it.
+ *
+ * `named` defaults to the same names, which is what an `ri:filename` reference
+ * produces. A diagram candidate is the only kind that appears in `all` alone, and its
+ * absence from the page is expected rather than worth reporting.
+ */
+function refs(all: readonly string[], named: readonly string[] = all): ReferencedAttachments {
+  return { all: new Set(all), named: new Set(named) };
+}
+
+const NOTHING = refs([]);
+const REFERENCED = refs(['a.png']);
 
 describe('what gets downloaded', () => {
   it('writes the bytes and reports the path for the converter', async () => {
@@ -58,7 +71,7 @@ describe('what gets downloaded', () => {
   it('downloads an unreferenced attachment when the setting says so (FR-8.5)', async () => {
     listed();
 
-    const outcome = await syncAttachments(deps({ referencedOnly: false }), PAGE, new Set(), {});
+    const outcome = await syncAttachments(deps({ referencedOnly: false }), PAGE, NOTHING, {});
 
     expect(outcome.downloaded).toBe(1);
   });
@@ -86,7 +99,7 @@ describe('requests it does not make', () => {
     // the difference between a large space syncing in minutes and in tens of them.
     listed();
 
-    const outcome = await syncAttachments(deps(), PAGE, new Set(), {});
+    const outcome = await syncAttachments(deps(), PAGE, NOTHING, {});
 
     expect(outcome).toEqual({ attachments: {}, downloaded: 0, skipped: [], failures: [] });
     expect(client.downloaded).toEqual([]);
@@ -95,7 +108,7 @@ describe('requests it does not make', () => {
   it('still asks when the setting wants everything, referenced or not', async () => {
     listed();
 
-    await syncAttachments(deps({ referencedOnly: false }), PAGE, new Set(), {});
+    await syncAttachments(deps({ referencedOnly: false }), PAGE, NOTHING, {});
 
     expect(client.downloaded).toEqual(['/download/a.png']);
   });
@@ -129,6 +142,61 @@ describe('what is refused, and why', () => {
   });
 });
 
+describe('a name the page refers to but does not have (FR-8.9)', () => {
+  it('is reported, so a missing picture is not silence', async () => {
+    // An `ri:attachment` reference outlives the attachment it names. Page 28603486 of
+    // space EP names seventeen images and Confluence lists five, which is why twelve
+    // of them show a widget — and until this, why that looked identical to a download
+    // that had not finished.
+    listed();
+
+    const outcome = await syncAttachments(deps(), PAGE, refs(['a.png', 'gone.png']), {});
+
+    expect(outcome.downloaded).toBe(1);
+    expect(outcome.skipped).toEqual([
+      {
+        pageId: '1',
+        filename: 'gone.png',
+        reason: 'referenced by the page, but Confluence does not have it',
+      },
+    ]);
+  });
+
+  it('says nothing about a diagram candidate that missed', async () => {
+    // Two of `diagramCandidates`' three rungs always miss — they are guesses, and the
+    // real listing is what decides. Reporting them would bury the real news.
+    listed();
+
+    const outcome = await syncAttachments(
+      deps(),
+      PAGE,
+      refs(['a.png', 'D.png', 'D.drawio.png', 'D'], ['a.png']),
+      {},
+    );
+
+    expect(outcome.skipped).toEqual([]);
+  });
+
+  it('reports it alongside an attachment refused for its size', async () => {
+    listed(30 * 1_048_576);
+
+    const outcome = await syncAttachments(deps(), PAGE, refs(['a.png', 'gone.png']), {});
+
+    expect(outcome.skipped.map((item) => item.filename).sort()).toEqual(['a.png', 'gone.png']);
+  });
+
+  it('says nothing when the listing could not be read at all', async () => {
+    // The page's attachments are unknown, not absent, and naming every reference as
+    // missing would be a lie the user would act on.
+    client.listError = new AppError('NETWORK_UNREACHABLE', 'The listing could not be read.');
+
+    const outcome = await syncAttachments(deps(), PAGE, refs(['a.png', 'gone.png']), {});
+
+    expect(outcome.skipped).toEqual([]);
+    expect(outcome.failures).toHaveLength(1);
+  });
+});
+
 describe('failures never stop the page (FR-3.9)', () => {
   it('reports a listing failure and downloads nothing', async () => {
     client.listError = new AppError('NETWORK_UNREACHABLE', 'The listing could not be read.');
@@ -147,7 +215,7 @@ describe('failures never stop the page (FR-3.9)', () => {
     ]);
     client.failDownload.add('/download/bad.png');
 
-    const outcome = await syncAttachments(deps(), PAGE, new Set(['bad.png', 'good.png']), {});
+    const outcome = await syncAttachments(deps(), PAGE, refs(['bad.png', 'good.png']), {});
 
     expect(outcome.failures).toHaveLength(1);
     expect(outcome.downloaded).toBe(1);

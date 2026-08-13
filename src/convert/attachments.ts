@@ -40,19 +40,36 @@ function decodeAttribute(value: string): string {
  */
 const DIAGRAM_NAME = /<ac:parameter ac:name="diagramName">([^<]*)<\/ac:parameter>/g;
 
+/**
+ * What a page body says about the attachments it uses.
+ *
+ * The two sets are kept apart because a *miss* means opposite things. A name the
+ * body states outright and the page does not have is worth telling the user about:
+ * the reference has outlived the file, and that is why FR-4.17 leaves a widget where
+ * a picture belongs. A diagram candidate that misses is the normal case — two of the
+ * three rungs always miss — and reporting those would bury the real news.
+ */
+export interface ReferencedAttachments {
+  /** Every name worth asking the page's listing for. */
+  readonly all: ReadonlySet<string>;
+  /** Names the body states outright, through an `ri:filename`. */
+  readonly named: ReadonlySet<string>;
+}
+
 /** Every attachment file name the body refers to. */
-export function referencedAttachments(storage: string): ReadonlySet<string> {
-  const names = new Set<string>();
+export function referencedAttachments(storage: string): ReferencedAttachments {
+  const named = new Set<string>();
 
   for (const match of storage.matchAll(FILENAME)) {
     const filename = match[1];
-    if (filename !== undefined) names.add(decodeAttribute(filename));
+    if (filename !== undefined) named.add(decodeAttribute(filename));
   }
 
+  const all = new Set(named);
   for (const match of storage.matchAll(DIAGRAM_NAME)) {
     const diagramName = match[1];
     if (diagramName === undefined) continue;
-    for (const candidate of diagramCandidates(decodeAttribute(diagramName))) names.add(candidate);
+    for (const candidate of diagramCandidates(decodeAttribute(diagramName))) all.add(candidate);
   }
-  return names;
+  return { all, named };
 }

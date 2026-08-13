@@ -1,6 +1,6 @@
 import type { ConfluenceAttachment } from '../api/api-types';
 import type { ConfluenceGateway } from '../api/confluence-client';
-import { referencedAttachments } from '../convert/attachments';
+import { referencedAttachments, type ReferencedAttachments } from '../convert/attachments';
 import type { AppError } from '../util/errors';
 import type { Logger } from '../util/logger';
 import { attachmentPath } from '../vault/path-mapper';
@@ -63,6 +63,36 @@ function megabytes(bytes: number): string {
 }
 
 /**
+ * Names the body asks for that the page does not have (spec FR-8.9).
+ *
+ * An `ri:attachment` reference outlives the attachment it names: someone deletes or
+ * renames the file and the body keeps pointing at the old name, in Confluence as much
+ * as here. FR-4.17 then leaves a widget rather than a broken picture, which is right —
+ * but until now it happened in silence, so a page showing five of its seventeen
+ * screenshots looked exactly like a page whose download had not finished. Page
+ * 28603486 of space EP is the case: twelve of its seventeen image references name a
+ * file Confluence no longer lists.
+ *
+ * Reported per name, not per page, because the fix is per name — re-attach the file in
+ * Confluence and the picture appears on the next pull, with no change here.
+ */
+function unlisted(
+  page: { readonly id: string },
+  named: ReadonlySet<string>,
+  listed: readonly ConfluenceAttachment[],
+): readonly SkippedAttachment[] {
+  const held = new Set(listed.map((attachment) => attachment.filename));
+
+  return [...named]
+    .filter((filename) => !held.has(filename))
+    .map((filename) => ({
+      pageId: page.id,
+      filename,
+      reason: 'referenced by the page, but Confluence does not have it',
+    }));
+}
+
+/**
  * Whether the copy on disk is already the copy Confluence has (FR-8.3).
  *
  * The file must still exist: an index entry whose file the user deleted has to
@@ -99,14 +129,14 @@ export function attachmentHook(
 export async function syncAttachments(
   deps: AttachmentDeps,
   page: { readonly id: string; readonly title: string },
-  referenced: ReadonlySet<string>,
+  referenced: ReferencedAttachments,
   previous: Readonly<Record<string, AttachmentState>>,
 ): Promise<AttachmentOutcome> {
   // A page whose body names no attachment has nothing to fetch, and asking
   // Confluence for its listing only to discard every entry costs one round trip
   // per page — serialised through the four-request cap, that is the difference
   // between a large space syncing in minutes and in tens of minutes.
-  if (deps.referencedOnly && referenced.size === 0) return EMPTY_ATTACHMENTS;
+  if (deps.referencedOnly && referenced.all.size === 0) return EMPTY_ATTACHMENTS;
 
   const listed = await deps.client.listAttachments(page.id);
   if (!listed.ok) {
@@ -114,12 +144,12 @@ export async function syncAttachments(
   }
 
   const attachments: Record<string, AttachmentState> = {};
-  const skipped: SkippedAttachment[] = [];
+  const skipped: SkippedAttachment[] = [...unlisted(page, referenced.named, listed.value)];
   const failures: SyncFailure[] = [];
   let downloaded = 0;
 
   for (const attachment of listed.value) {
-    if (deps.referencedOnly && !referenced.has(attachment.filename)) continue;
+    if (deps.referencedOnly && !referenced.all.has(attachment.filename)) continue;
 
     if (tooLarge(attachment, deps.sizeLimitBytes)) {
       skipped.push({
