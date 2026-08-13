@@ -198,6 +198,28 @@ describe('placeholder renderer (FR-4.5)', () => {
       expect(headingText('snake_case and _italic_ here')).toBe('snake_case and italic here');
     });
 
+    it('decodes the character references a heading collects', () => {
+      // Page 98074876's contents list showed `3.2&#x20; &#x20; UC-2: …`, spelled out.
+      // `remark-stringify` escapes a space it cannot leave bare, and a mirrored heading
+      // gathers several of them between emphasis runs.
+      expect(headingText('**3.2&#x20;**&#x20;**UC-2: XSÖMV qəbzlərin təsdiqi**')).toBe(
+        '3.2 UC-2: XSÖMV qəbzlərin təsdiqi',
+      );
+      expect(headingText('Vergi &amp; rüsum')).toBe('Vergi & rüsum');
+      expect(headingText('A&#32;B&nbsp;C')).toBe('A B C');
+    });
+
+    it('decodes after stripping tags, so escaped markup survives as text', () => {
+      // Decoding first would turn this into a tag and then delete it, losing the words
+      // the author meant a reader to see.
+      expect(headingText('The &lt;b&gt; element')).toBe('The <b> element');
+    });
+
+    it('refuses a code point that is not one, rather than throwing', () => {
+      // A contents list must not be able to take a page's rendering down with it.
+      expect(headingText('bad &#x110000; here')).toBe('bad here');
+    });
+
     it('omits a heading that is nothing but a picture', () => {
       // `<strong><br/><br/>![[…png|1000]]</strong>` is a real heading from that
       // page. There is no title in it to list, and it reached the reader raw.

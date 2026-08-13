@@ -96,9 +96,38 @@ export function headingText(heading: string): string {
       // where a delimiter can be — `snake_case` survives, `_italic_` does not.
       .replace(/\*/g, '')
       .replace(/(^|\s)_+|_+(?=\s|$)/g, '$1')
+      // Character references last, and last for a reason: decoding before the tags
+      // were stripped would turn a heading's literal `&lt;b&gt;` into a tag and then
+      // delete it, losing text the author meant a reader to see.
+      .replace(/&#x([0-9a-f]+);/gi, (_all, hex: string) => codePoint(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_all, digits: string) => codePoint(Number(digits)))
+      .replace(/&(amp|lt|gt|quot|apos|nbsp);/g, (all, name: string) => NAMED.get(name) ?? all)
       .replace(/\s+/g, ' ')
       .trim()
   );
+}
+
+/** The named references a mirrored heading carries. */
+const NAMED = new Map([
+  ['amp', '&'],
+  ['lt', '<'],
+  ['gt', '>'],
+  ['quot', '"'],
+  ['apos', "'"],
+  ['nbsp', ' '],
+]);
+
+/**
+ * One character from a code point, or nothing when it is not one.
+ *
+ * `remark-stringify` escapes a space it cannot leave bare as `&#x20;`, and a mirrored
+ * heading collects several: `## **3.2&#x20;**&#x20;**UC-2: …**` reached the rebuilt
+ * contents list with every one of them spelled out, which is what the client saw as
+ * "incorrect symbols". A value outside Unicode would make `fromCodePoint` throw, and a
+ * contents list must not be able to take a page's rendering down.
+ */
+function codePoint(value: number): string {
+  return value > 0 && value <= 0x10ffff ? String.fromCodePoint(value) : '';
 }
 
 /**

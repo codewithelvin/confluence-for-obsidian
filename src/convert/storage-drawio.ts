@@ -45,7 +45,16 @@ function parameterValue(macro: Element, name: string): string {
 export function diagramCandidates(diagramName: string): readonly string[] {
   const name = diagramName.trim();
   if (name.length === 0) return [];
-  return [`${name}.png`, `${name}.drawio.png`, name];
+
+  const rungs = (base: string): readonly string[] => [`${base}.png`, `${base}.drawio.png`, base];
+
+  // The **untrimmed** name is asked for too, where it differs. A diagram name can carry
+  // a trailing space — page 98074876's is `XRMV ` — and the app names the preview after
+  // the name as given, so trimming first asks for a file that was never created and the
+  // diagram stays a widget beside a preview that is right there. Trimmed first, because
+  // it is the common case; the extra rungs cost nothing when they miss, for the reason
+  // above.
+  return name === diagramName ? rungs(name) : [...rungs(name), ...rungs(diagramName)];
 }
 
 /** The preview on disk, or `null` when none of the candidates came down. */

@@ -169,6 +169,20 @@ describe('finding the preview to download (FR-8.8)', () => {
     expect(diagramCandidates('   ')).toEqual([]);
   });
 
+  it('asks for the untrimmed name too, where the two differ', () => {
+    // Page 98074876's diagram is named `XRMV ` with a trailing space, and the app names
+    // the preview after the name as given — so trimming first asks only for a file that
+    // was never created, and the diagram stays a widget beside a preview on the page.
+    expect(diagramCandidates('XRMV ')).toEqual([
+      'XRMV.png',
+      'XRMV.drawio.png',
+      'XRMV',
+      'XRMV .png',
+      'XRMV .drawio.png',
+      'XRMV ',
+    ]);
+  });
+
   it('puts them in the referenced set, so a diagram-only page is still listed', () => {
     // Without this the page is skipped before its attachments are ever listed,
     // and FR-4.13 has nothing on disk to embed.
