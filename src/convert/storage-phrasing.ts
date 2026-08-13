@@ -165,11 +165,15 @@ function convertAcLink(element: Element, ctx: ConversionContext): PhrasingConten
 /**
  * Inline formatting, unless the element cannot survive as Markdown emphasis.
  *
- * Three cases are preserved instead of converted:
+ * Three cases cannot be Markdown emphasis:
  *  - attributes, e.g. `<strong style="letter-spacing: 0.0px;">`, which Markdown
  *    emphasis has nowhere to carry;
  *  - empty elements, since `****` is not emphasis at all;
  *  - whitespace-only content, since `** **` does not parse as emphasis either.
+ *
+ * The first two go out as their own tags, which renders identically and round-trips
+ * exactly. Only whitespace stays a widget, because `remark-stringify` has nowhere
+ * reliable to keep a run of spaces and losing one costs the page its push.
  */
 function wrap(
   type: 'strong' | 'emphasis' | 'delete',
@@ -185,10 +189,18 @@ function wrap(
     return preserveAsHtml(element, ctx);
   }
 
-  // Emphasis needs a word to attach to. `**` is not emphasis, `** **` is not
-  // either, and `*.*` fails the flanking rules, so anything without a letter or
-  // digit is preserved rather than converted.
+  // Emphasis needs a word to attach to: mid-sentence `word**.**` is not
+  // left-flanking, so `**` there is two literal asterisks rather than a delimiter.
   if (!/[\p{L}\p{N}]/u.test(text)) {
+    // Punctuation on its own is the overwhelming case — 784 of these in the mirror,
+    // led by 210 bold full stops and 202 bold `№` — and it was the third largest
+    // cause of a grey pill there. It needs no placeholder at all: `<strong>.</strong>`
+    // written into the note *is* a bold full stop in both Obsidian modes, and the
+    // reverse pass hands the tags straight back, so the round trip is exact and
+    // nothing is approximated. The same device already carries `<strong style=…>`
+    // two branches up; this case was simply never sent down it.
+    if (text.trim().length > 0) return preserveAsHtml(element, ctx);
+
     return makeInlinePlaceholder(ctx.placeholders, element, {
       type,
       label: `${tagOf(element)} without word content`,

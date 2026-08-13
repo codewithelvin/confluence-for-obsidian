@@ -190,10 +190,13 @@ describe('emphasis wrapped around a picture (§6.4.5)', () => {
     expect(certified(toc)).toBe(true);
   });
 
-  it('is kept around wordless text, which Markdown really cannot write', () => {
-    // `**№**` is not emphasis to CommonMark. Wordless bold punctuation outnumbers
-    // both the images and the macros, and every one of them must stay preserved.
-    expect(convert('<p><strong>№</strong></p>')).toContain('{cf:');
+  it('is kept around wordless text, but as tags rather than as a pill', () => {
+    // `**№**` is not emphasis to CommonMark, so the wrapper cannot be dropped — but it
+    // does not have to be hidden either. Wordless bold punctuation outnumbers both the
+    // images and the macros (784 in the mirror), and raw inline HTML carries every one
+    // of them exactly, where a fragment only ever carried it opaquely.
+    expect(convert('<p><strong>№</strong></p>')).toBe('<strong>№</strong>');
+    expect(certified('<p><strong>№</strong></p>')).toBe(true);
   });
 });
 
