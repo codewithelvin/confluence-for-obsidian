@@ -2,6 +2,7 @@ import type { PhrasingContent, RootContent, Table, TableCell, TableRow } from 'm
 import { hideEmoticonsIn } from './emoticons';
 import { makeBlockPlaceholder } from './placeholder-factory';
 import { hideTableMediaIn } from './table-media';
+import { hideTableFilesIn } from './table-files';
 import { hideTaskListsIn } from './table-tasks';
 import { acAttr, childrenOf, hasNamespacedMarkup, tagOf } from './storage-parser';
 import { FAITHFUL, serialiseElement, WHITESPACE_PRESERVING } from './storage-serialiser';
@@ -374,6 +375,10 @@ function projectTable(table: Element, ctx: ConversionContext): Projection {
   // projected first, and the list would then wrap a carrier inside a carrier
   // (§6.4.14, D23).
   if (!hideTaskListsIn(projected, ctx)) return { reason: NAMESPACED };
+  // A document-preview macro becomes a link to the file (§6.4.17, D26). Also before
+  // the media, because the macro *contains* an `ri:attachment` that the media pass
+  // has no business reading on its own.
+  if (!hideTableFilesIn(projected, ctx)) return { reason: NAMESPACED };
   // Same argument one layer down, and a far larger one: 260 tables on 148 pages
   // hold an `ac:image` and nothing else worse (§6.4.10, D19).
   if (!hideTableMediaIn(projected, ctx)) return { reason: NAMESPACED };

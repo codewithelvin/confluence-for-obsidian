@@ -1,5 +1,6 @@
 import { preserveBeside } from './placeholder-factory';
 import { childrenOf, firstElement, riAttr, tagOf } from './storage-parser';
+import { PROJECTED_TABLE_FILE } from './table-files';
 import { PROJECTED_TASK_LIST } from './table-tasks';
 import type { ConversionContext, ReverseContext } from './types';
 
@@ -245,7 +246,8 @@ function planReplacements(clone: Element, ctx: ConversionContext): Replacement[]
  * am" — and has never cared what kind of element stands there.
  */
 const PROJECTED = new RegExp(
-  `(?:<img\\b[^>]*\\/?>|<a\\b[^>]*>[^<]*<\\/a>|${PROJECTED_TASK_LIST})?<!--cf-tbl:(cfb-\\d+)-->`,
+  '(?:<img\\b[^>]*\\/?>|<a\\b[^>]*>[^<]*<\\/a>' +
+    `|${PROJECTED_TASK_LIST}|${PROJECTED_TABLE_FILE})?<!--cf-tbl:(cfb-\\d+)-->`,
 );
 
 /**
