@@ -485,12 +485,56 @@ function unwrapParagraphAroundMacro(element: Element): void {
 }
 
 /**
+ * Puts an anchor link's text into the one body form, and trims it (§6.4.15).
+ *
+ * Confluence writes an anchor link's text two ways — `<ac:link-body>` and
+ * `<ac:plain-text-link-body>` — and renders them identically when the body holds
+ * nothing but text. The mirror has 2 126 of the first and 1 403 of the second, so
+ * whichever form the reverse pass wrote, the other could never be reproduced and
+ * every page holding one would be read-only. This chooses the plain-text form,
+ * which is the one a Markdown link's text can carry back.
+ *
+ * The text is trimmed too. Confluence stores these with a trailing space
+ * remarkably often — `<ac:link-body>1. History </ac:link-body>` — and a Markdown
+ * link's text is not a reliable place to keep one. Inside a link the space is
+ * invisible but for a hair of extra underline, which is the §6.4.5 bargain exactly.
+ *
+ * Scoped to anchor links. A *page* link's two body forms decide whether it can
+ * become a wikilink at all (`plainLabel` returns `undefined` for the rich form), so
+ * collapsing them there would change how page links render — a separate question
+ * with its own evidence.
+ */
+function canonicaliseAnchorLinkBody(element: Element): void {
+  if (tagOf(element) !== 'ac:link' || element.getAttribute('ac:anchor') === null) return;
+
+  for (const child of childrenOf(element)) {
+    if (child.nodeType !== Node.ELEMENT_NODE) continue;
+
+    const body = child as Element;
+    const tag = tagOf(body);
+    if (tag !== 'ac:link-body' && tag !== 'ac:plain-text-link-body') continue;
+
+    // A body carrying markup is left exactly as it is: it cannot become a Markdown
+    // link's text, so it must stay a widget, and rewriting it would only make the
+    // widget's fragment differ from what Confluence sent.
+    if (childrenOf(body).some((node) => node.nodeType === Node.ELEMENT_NODE)) return;
+
+    const text = (body.textContent ?? '').trim();
+    const replacement = element.ownerDocument.createElement('ac:plain-text-link-body');
+    replacement.appendChild(element.ownerDocument.createTextNode(text));
+    element.replaceChild(replacement, body);
+    return;
+  }
+}
+
+/**
  * Every canonicalisation, in the order they depend on each other: structure
  * first, then whitespace, so a trim sees the elements it will actually be next to.
  */
 export function canonicaliseForm(element: Element): void {
   const tag = tagOf(element);
   unwrapParagraphAroundMacro(element);
+  canonicaliseAnchorLinkBody(element);
   if (tag === 'table') canonicaliseTableSections(element);
   if (tag === 'li') wrapLooseItemContent(element);
 

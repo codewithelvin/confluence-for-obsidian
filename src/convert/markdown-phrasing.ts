@@ -5,6 +5,7 @@ import {
   readCarriedImageId,
   readInlinePlaceholderId,
 } from './placeholder-registry';
+import { anchorLinkStorage, readAnchorUrl } from './storage-anchor';
 import { escapeAttribute, escapeText } from './storage-serialiser';
 import type { ReverseContext } from './types';
 import {
@@ -119,6 +120,16 @@ function linkToStorage(node: Link, ctx: ReverseContext): string {
 
   const url = node.url;
   const children = node.children;
+
+  // A fragment destination is an anchor link and nothing else (§6.4.15): a raw
+  // `<a href="#…">` is preserved as its own tags on the way in, so it never arrives
+  // here. A body the link form cannot carry falls through to `<a href>` below, where
+  // the push verifier stops the page rather than this guessing at storage.
+  const anchor = readAnchorUrl(url);
+  const onlyText = children.length === 1 && children[0]?.type === 'text' ? children[0] : null;
+  if (anchor !== null && onlyText !== null) {
+    return anchorLinkStorage(anchor, onlyText.value);
+  }
   const target = pageTarget(url, ctx);
   if (target === null) {
     // The title is part of the anchor, and dropping it lost the tooltip *and* the

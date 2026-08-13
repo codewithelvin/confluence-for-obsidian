@@ -3,6 +3,7 @@ import { makeInlineClose, makeInlineOpen, makeInlinePlaceholder } from './placeh
 import { CODE_SEPARATOR, collapse, readInlinePlaceholderId } from './placeholder-registry';
 import { acAttr, childrenOf, firstElement, riAttr, tagOf } from './storage-parser';
 import { emoticonCarrier, emoticonGlyph } from './emoticons';
+import { anchorLabel, convertAnchorLink, isAnchorLink, isAnchorUrl } from './storage-anchor';
 import { convertDiagramInline, DIAGRAM_MACROS, macroLabel } from './storage-drawio';
 import { convertIncludeInline, INCLUDE_MACROS } from './storage-include';
 import { convertImage } from './storage-images';
@@ -116,6 +117,21 @@ function wikilink(
 }
 
 function convertAcLink(element: Element, ctx: ConversionContext): PhrasingContent {
+  // Asked first: an anchor link's resource, where it has one, is an
+  // `ri:content-entity` naming the page the anchor is on — not a link target of the
+  // kind the branches below understand. 3 561 of these were preserved whole, taking
+  // their own text with them (§6.4.15).
+  if (isAnchorLink(element)) {
+    const anchor = convertAnchorLink(element);
+    if (anchor !== null) return anchor;
+
+    return makeInlinePlaceholder(ctx.placeholders, element, {
+      type: 'link',
+      name: 'anchor',
+      label: anchorLabel(element),
+    });
+  }
+
   const resource = firstElement(element);
   const resourceTag = resource === null ? '' : tagOf(resource);
 
@@ -216,10 +232,15 @@ function convertAnchor(
   // styling — `<a href="..." style="color: rgb(0,0,0);">` is common — must be
   // preserved. So must a link into Confluence, which would otherwise be
   // indistinguishable from an `ac:link` when converting back.
+  // A fragment destination is reserved for `ac:link ac:anchor` (§6.4.15). The two
+  // would otherwise render as the same Markdown link, and the reverse pass — having
+  // to write one or the other — would turn every raw `<a href="#…">` into an
+  // `ac:link` and take the push away from its page. Preserving the tags keeps them
+  // distinguishable while the text stays readable, exactly as for `/display/` below.
   const extraAttributes = Array.from(element.attributes).some(
     (attribute) => attribute.name !== 'href' && attribute.name !== 'title',
   );
-  if (extraAttributes || href.startsWith(`${ctx.baseUrl}/display/`)) {
+  if (extraAttributes || isAnchorUrl(href) || href.startsWith(`${ctx.baseUrl}/display/`)) {
     return preserveAsHtml(element, ctx);
   }
 
