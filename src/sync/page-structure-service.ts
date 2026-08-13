@@ -326,8 +326,8 @@ export class PageStructureService {
     );
     if (!pulled.ok) return pulled;
 
-    await this.record(subscription.id, pulled.value);
-    return pulled;
+    await this.record(subscription.id, pulled.value.state);
+    return ok(pulled.value.state);
   }
 
   private connectionFor(subscription: Subscription): Result<ConnectionProfile, AppError> {

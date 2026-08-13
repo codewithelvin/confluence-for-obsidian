@@ -5,12 +5,12 @@ import type { ConnectionProfile, Subscription } from '../settings/settings-types
 import { AppError } from '../util/errors';
 import { sha256 } from '../util/hash';
 import type { Logger } from '../util/logger';
-import { err, type Result } from '../util/result';
+import { err, ok, type Result } from '../util/result';
 import { parentPath, type VaultGateway } from '../vault/vault-gateway';
 import type { BackupStore } from './backup-store';
 import type { FragmentStore } from './fragment-store';
 import { locateNote, subscriptionFor } from './note-locator';
-import { pullSinglePage } from './pull-executor';
+import { pullSinglePage, type SinglePagePull } from './pull-executor';
 import { singlePageExecutor } from './single-page-deps';
 import type { PageState, SyncStateStore } from './sync-state';
 
@@ -83,7 +83,7 @@ export class NoteService {
    * Deliberately not routed through the full sync: the point of the command is
    * to refresh *this* page without waiting for an enumeration of the space.
    */
-  async pullPage(notePath: string): Promise<Result<PageState, AppError>> {
+  async pullPage(notePath: string): Promise<Result<SinglePagePull, AppError>> {
     const target = locateNote(this.deps, notePath);
     if (!target.ok) return target;
 
@@ -104,7 +104,7 @@ export class NoteService {
     );
     if (!pulled.ok) return pulled;
 
-    await this.record(subscription.id, pulled.value);
+    await this.record(subscription.id, pulled.value.state);
     return pulled;
   }
 
@@ -148,8 +148,8 @@ export class NoteService {
     );
     if (!pulled.ok) return pulled;
 
-    await this.record(subscription.id, pulled.value);
-    return pulled;
+    await this.record(subscription.id, pulled.value.state);
+    return ok(pulled.value.state);
   }
 
   /**

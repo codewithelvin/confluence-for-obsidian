@@ -132,7 +132,7 @@ async function keepRemote(
   });
 
   return pulled.ok
-    ? outcome(decision, { state: pulled.value })
+    ? outcome(decision, { state: pulled.value.state })
     : outcome(decision, { error: pulled.error });
 }
 

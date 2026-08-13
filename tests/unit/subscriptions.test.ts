@@ -259,7 +259,7 @@ describe('SyncController', () => {
 
     const result = await notes.pullPage('ENG/A.md');
 
-    expect(result.ok && result.value.pageId).toBe('1');
+    expect(result.ok && result.value.state.pageId).toBe('1');
     expect(client.fetched).toEqual(['1']);
   });
 

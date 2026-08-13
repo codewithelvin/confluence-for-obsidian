@@ -302,6 +302,21 @@ export interface SinglePageTarget {
 }
 
 /**
+ * What one page's re-pull produced.
+ *
+ * The skipped attachments travel with the state because this path has **no sync
+ * report to put them in**, and it is the path a user reaches for when a picture is
+ * missing — `Pull this page from Confluence` is the only lever that fetches a body
+ * unconditionally. Collecting FR-8.9's answer here and dropping it on the floor left
+ * the one question the command exists to answer unanswerable.
+ */
+export interface SinglePagePull {
+  readonly state: PageState;
+  /** Over the size limit (FR-8.4), or not in Confluence at all (FR-8.9). */
+  readonly skippedAttachments: readonly SkippedAttachment[];
+}
+
+/**
  * Re-pulls one page on demand (spec FR-3.8).
  *
  * The page reference comes from the fetch itself rather than from the index, so
@@ -312,7 +327,7 @@ export async function pullSinglePage(
   deps: ExecutorDeps,
   pageId: string,
   target: SinglePageTarget,
-): Promise<Result<PageState, AppError>> {
+): Promise<Result<SinglePagePull, AppError>> {
   const fetched = await deps.client.getPage(pageId);
   if (!fetched.ok) return fetched;
 
@@ -339,7 +354,7 @@ export async function pullSinglePage(
   const state = outcome.states[0];
   return state === undefined
     ? err(new AppError('UNKNOWN', `Nothing was written for page ${pageId}.`))
-    : ok(state);
+    : ok({ state, skippedAttachments: outcome.skippedAttachments });
 }
 
 /** What a deletion pass managed to remove, and what stopped it (FR-3.5, FR-3.9). */

@@ -147,9 +147,38 @@ describe('pulling one page (FR-3.8)', () => {
   it('writes the page back and records it', async () => {
     const pulled = await service.pullPage('EP/Architecture.md');
 
-    expect(pulled.ok && pulled.value.remoteVersion).toBe(1);
+    expect(pulled.ok && pulled.value.state.remoteVersion).toBe(1);
     expect(vault.writes).toContain('EP/Architecture.md');
     expect(state.forSubscription('sub').pages['1']?.localHash).not.toBe('hash');
+  });
+
+  it('reports an attachment Confluence does not have (FR-8.9)', async () => {
+    // This path has no sync report to put the answer in, and it is the one a user
+    // reaches for when a picture is missing — so the answer travels with the state.
+    // Collecting it and dropping it left the command unable to explain itself.
+    client.pages = [
+      {
+        id: '1',
+        title: 'Architecture',
+        parentId: 'root',
+        storage: '<p><ac:image><ri:attachment ri:filename="gone.png"/></ac:image></p>',
+      },
+    ];
+
+    const pulled = await service.pullPage('EP/Architecture.md');
+
+    expect(pulled.ok && pulled.value.skippedAttachments).toEqual([
+      {
+        pageId: '1',
+        filename: 'gone.png',
+        reason: 'referenced by the page, but Confluence does not have it',
+      },
+    ]);
+  });
+
+  it('reports nothing skipped when the body names no attachment', async () => {
+    const pulled = await service.pullPage('EP/Architecture.md');
+    expect(pulled.ok && pulled.value.skippedAttachments).toEqual([]);
   });
 
   it('backs the note up first, because a re-pull discards local edits (FR-6.6)', async () => {

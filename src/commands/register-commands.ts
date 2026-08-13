@@ -5,6 +5,7 @@ import type { CredentialStore } from '../auth/credential-store';
 import { probeSpaceFidelity } from '../diagnostics/fidelity-probe';
 import type { SettingsStore } from '../settings/settings-store';
 import type { ConnectionProfile, Subscription } from '../settings/settings-types';
+import type { SkippedAttachment } from '../sync/attachment-executor';
 import type { NoteService } from '../sync/note-service';
 import type { SyncController } from '../sync/sync-controller';
 import { FidelityReportModal } from '../ui/fidelity-report-modal';
@@ -101,10 +102,27 @@ async function pullActive(deps: CommandDeps): Promise<void> {
   }
 
   const result = await deps.notes.pullPage(file.path);
+  if (!result.ok) {
+    new Notice(result.error.userMessage, 10_000);
+    return;
+  }
+
+  // A single-page pull has no sync report to put FR-8.9's answer in, and this is the
+  // command a user reaches for when a picture is missing — so it says so here, or the
+  // one question the command exists to answer stays unanswerable.
+  const { state, skippedAttachments } = result.value;
   new Notice(
-    result.ok ? `Pulled "${result.value.title}" from Confluence.` : result.error.userMessage,
-    result.ok ? 4000 : 10_000,
+    `Pulled "${state.title}" from Confluence.${skippedList(skippedAttachments)}`,
+    skippedAttachments.length === 0 ? 4000 : 15_000,
   );
+}
+
+/** The skipped attachments as a notice can show them, or nothing at all. */
+function skippedList(skipped: readonly SkippedAttachment[]): string {
+  if (skipped.length === 0) return '';
+
+  const lines = skipped.map((item) => `• ${item.filename} — ${item.reason}`);
+  return `\n\n${String(skipped.length)} attachment(s) not downloaded:\n${lines.join('\n')}`;
 }
 
 function openInConfluence(deps: CommandDeps): void {
