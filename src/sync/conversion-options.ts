@@ -1,3 +1,4 @@
+import { normaliseFilename } from '../convert/attachments';
 import type { ConversionOptions } from '../convert/types';
 import type { PageTarget } from '../convert/types';
 import type { AttachmentState } from './sync-state';
@@ -38,6 +39,17 @@ export function conversionOptionsFor(
     Object.entries(attachments).map(([filename, state]) => [state.localPath, filename]),
   );
 
+  // Keyed and looked up in one Unicode form (FR-8.10). The index is built from the
+  // attachment listing and the lookup comes from the body's `ri:filename`; the two need
+  // not agree byte for byte, and where they did not, a file that had been downloaded
+  // resolved to nothing and the note kept a widget over a picture already on disk.
+  const byName = new Map<string, string>(
+    Object.entries(attachments).map(([filename, state]) => [
+      normaliseFilename(filename),
+      state.localPath,
+    ]),
+  );
+
   return {
     baseUrl: inputs.baseUrl,
     spaceKey: inputs.spaceKey,
@@ -45,7 +57,7 @@ export function conversionOptionsFor(
     resolveTarget: inputs.resolveTarget,
     resolveVaultPath: inputs.resolveVaultPath,
     resolvePageId: inputs.resolvePageId,
-    resolveAttachment: (filename) => attachments[filename]?.localPath ?? null,
+    resolveAttachment: (filename) => byName.get(normaliseFilename(filename)) ?? null,
     attachmentFor: (path) => byPath.get(path) ?? null,
   };
 }

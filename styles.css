@@ -270,3 +270,83 @@
   font-size: var(--font-ui-smaller);
   word-break: break-word;
 }
+
+/*
+ * Attached documents, as §6.4.13 embeds them.
+ *
+ * Obsidian draws an embed of a file it cannot preview as a full-width bordered block,
+ * which is right for one document and wrong for a page that lists several: on space EP
+ * a page is often nothing but a row of forms, and each claimed a line of its own.
+ * Shrink-wrapped and inline, they read as a set of attachments rather than as sections.
+ *
+ * Keyed on the attachment folder, not on a class this plugin adds. `_attachments` is a
+ * fixed segment of every path FR-8.1 writes, so the selector reaches exactly the
+ * embeds this plugin is responsible for and no others in the user's vault — and it
+ * works in Reading View and Live Preview alike, because both render the same element.
+ * A class would need a post-processor per mode and would still only cover one of them.
+ *
+ * `:not(.pdf-embed)` matters: Obsidian *can* preview a PDF, in an iframe that needs its
+ * full width. Shrinking that would replace a readable document with a sliver of one.
+ */
+.internal-embed.file-embed[src*='/_attachments/']:not(.pdf-embed) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  width: auto;
+  max-width: 100%;
+  margin: var(--size-2-1) var(--size-4-1) var(--size-2-1) 0;
+  padding: var(--size-4-1) var(--size-4-2);
+  vertical-align: middle;
+}
+
+/*
+ * An icon per format, as a character rather than an image.
+ *
+ * §6.4.9 settled this argument for emoticons: a glyph needs no asset, no network and no
+ * probe, and it inherits the reader's font. The list is the formats the mirror actually
+ * holds — 162 `.xlsx`, 86 `.docx`, 12 `.xsd`, 9 `.doc`, 6 `.xls`, 5 `.pdf`, 2 `.zip` —
+ * with the paperclip standing in for anything else rather than a spreadsheet icon
+ * guessing at a format nobody has.
+ */
+.internal-embed.file-embed[src*='/_attachments/']::before {
+  content: '📎';
+  flex: none;
+  font-size: var(--font-ui-medium);
+  line-height: 1;
+}
+
+.internal-embed.file-embed[src$='.doc']::before,
+.internal-embed.file-embed[src$='.docx']::before,
+.internal-embed.file-embed[src$='.rtf']::before,
+.internal-embed.file-embed[src$='.odt']::before {
+  content: '📄';
+}
+
+.internal-embed.file-embed[src$='.xls']::before,
+.internal-embed.file-embed[src$='.xlsx']::before,
+.internal-embed.file-embed[src$='.csv']::before,
+.internal-embed.file-embed[src$='.ods']::before {
+  content: '📊';
+}
+
+.internal-embed.file-embed[src$='.ppt']::before,
+.internal-embed.file-embed[src$='.pptx']::before,
+.internal-embed.file-embed[src$='.odp']::before {
+  content: '📽️';
+}
+
+.internal-embed.file-embed[src$='.pdf']::before {
+  content: '📕';
+}
+
+.internal-embed.file-embed[src$='.zip']::before,
+.internal-embed.file-embed[src$='.7z']::before,
+.internal-embed.file-embed[src$='.rar']::before {
+  content: '🗜️';
+}
+
+.internal-embed.file-embed[src$='.xsd']::before,
+.internal-embed.file-embed[src$='.xml']::before,
+.internal-embed.file-embed[src$='.json']::before {
+  content: '🧾';
+}

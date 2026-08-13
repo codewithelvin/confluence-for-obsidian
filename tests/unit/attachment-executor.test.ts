@@ -157,9 +157,35 @@ describe('a name the page refers to but does not have (FR-8.9)', () => {
       {
         pageId: '1',
         filename: 'gone.png',
-        reason: 'referenced by the page, but Confluence does not have it',
+        reason: 'no attachment of this name is on the page — the page has 1: a.png',
       },
     ]);
+  });
+
+  it("quotes the page's own names, so a near-miss diagnoses itself", async () => {
+    // The reason used to read "Confluence does not have it", which is a claim about the
+    // instance this code cannot support — a renamed file or a second Unicode spelling
+    // misses the same way, and that verdict sends the user to re-upload a file that is
+    // already there.
+    client.attachments.set('1', [
+      { id: 'a', filename: 'Sürəti Düzəliş.xlsx', version: 1, size: 10, downloadPath: '/d/a' },
+    ]);
+
+    const outcome = await syncAttachments(deps(), PAGE, refs(['Surəti Düzəliş.xlsx']), {});
+
+    expect(outcome.skipped[0]?.reason).toBe(
+      'no attachment of this name is on the page — the page has 1: Sürəti Düzəliş.xlsx',
+    );
+  });
+
+  it('says so plainly when the page has no attachments at all', async () => {
+    client.attachments.set('1', []);
+
+    const outcome = await syncAttachments(deps(), PAGE, refs(['gone.png']), {});
+
+    expect(outcome.skipped[0]?.reason).toBe(
+      'no attachment of this name is on the page — the page has no attachments at all',
+    );
   });
 
   it('says nothing about a diagram candidate that missed', async () => {
@@ -183,6 +209,28 @@ describe('a name the page refers to but does not have (FR-8.9)', () => {
     const outcome = await syncAttachments(deps(), PAGE, refs(['a.png', 'gone.png']), {});
 
     expect(outcome.skipped.map((item) => item.filename).sort()).toEqual(['a.png', 'gone.png']);
+  });
+
+  it('downloads a file the listing spells in the other Unicode form (FR-8.10)', async () => {
+    // `ü` is either U+00FC or `u` + U+0308, and macOS stores the decomposed form — so a
+    // file uploaded from a Mac is *listed* decomposed while the body references it
+    // composed. Matched raw, it is silently never downloaded and then reported as a
+    // file Confluence does not have.
+    const decomposed = 'Sürəti.xlsx';
+    const composed = 'Sürəti.xlsx';
+    expect(decomposed).not.toBe(composed);
+
+    client.attachments.set('1', [
+      { id: 'a', filename: decomposed, version: 1, size: 10, downloadPath: '/d/a' },
+    ]);
+
+    const outcome = await syncAttachments(deps(), PAGE, refs([composed]), {});
+
+    expect(outcome.downloaded).toBe(1);
+    expect(outcome.skipped).toEqual([]);
+    // Recorded under the form the converter will ask for, or the note keeps a widget
+    // over a picture that is already on disk.
+    expect(outcome.attachments[composed]?.localPath).toBeDefined();
   });
 
   it('says nothing when the listing could not be read at all', async () => {

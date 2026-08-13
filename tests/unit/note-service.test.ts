@@ -152,7 +152,7 @@ describe('pulling one page (FR-3.8)', () => {
     expect(state.forSubscription('sub').pages['1']?.localHash).not.toBe('hash');
   });
 
-  it('reports an attachment Confluence does not have (FR-8.9)', async () => {
+  it('reports an attachment no file on the page matches (FR-8.9)', async () => {
     // This path has no sync report to put the answer in, and it is the one a user
     // reaches for when a picture is missing — so the answer travels with the state.
     // Collecting it and dropping it left the command unable to explain itself.
@@ -171,7 +171,7 @@ describe('pulling one page (FR-3.8)', () => {
       {
         pageId: '1',
         filename: 'gone.png',
-        reason: 'referenced by the page, but Confluence does not have it',
+        reason: 'no attachment of this name is on the page — the page has no attachments at all',
       },
     ]);
   });

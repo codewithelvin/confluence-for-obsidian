@@ -41,6 +41,24 @@ function decodeAttribute(value: string): string {
 const DIAGRAM_NAME = /<ac:parameter ac:name="diagramName">([^<]*)<\/ac:parameter>/g;
 
 /**
+ * One spelling of a file name, for comparing two of them (spec FR-8.10).
+ *
+ * A name reaches this plugin from two places that need not agree byte for byte: the
+ * page body's `ri:filename`, and the attachment listing's title. Both are Unicode, and
+ * the same Azerbaijani file name can be composed two ways — `ü` is either U+00FC or
+ * `u` followed by U+0308, and macOS stores the decomposed form, so a file uploaded
+ * from a Mac can be *listed* decomposed while the body references it composed.
+ *
+ * Matched raw, those are different names: the download is skipped, nothing lands on
+ * disk, and the reference is reported as a file Confluence does not have — which is a
+ * lie about the instance and sends the user to fix the wrong thing. NFC is the form to
+ * settle on, being what the web and Confluence's own editor produce.
+ */
+export function normaliseFilename(filename: string): string {
+  return filename.normalize('NFC');
+}
+
+/**
  * What a page body says about the attachments it uses.
  *
  * The two sets are kept apart because a *miss* means opposite things. A name the
@@ -62,14 +80,16 @@ export function referencedAttachments(storage: string): ReferencedAttachments {
 
   for (const match of storage.matchAll(FILENAME)) {
     const filename = match[1];
-    if (filename !== undefined) named.add(decodeAttribute(filename));
+    if (filename !== undefined) named.add(normaliseFilename(decodeAttribute(filename)));
   }
 
   const all = new Set(named);
   for (const match of storage.matchAll(DIAGRAM_NAME)) {
     const diagramName = match[1];
     if (diagramName === undefined) continue;
-    for (const candidate of diagramCandidates(decodeAttribute(diagramName))) all.add(candidate);
+    for (const candidate of diagramCandidates(decodeAttribute(diagramName))) {
+      all.add(normaliseFilename(candidate));
+    }
   }
   return { all, named };
 }
