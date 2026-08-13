@@ -84,6 +84,19 @@ const BUTTON =
   '<ri:attachment ri:filename="Secondary button.png"/>' +
   '</ac:image>';
 
+/**
+ * Something no projection can show, for the refusal cases.
+ *
+ * A `jira` macro, which is 684 of the mirror's occurrences and cannot be drawn without
+ * the system behind it. It is also the right shape for the rollback case: no pass
+ * *refuses* on it, so the image beside it is projected first and only the namespaced
+ * check at the end turns the table down — which is exactly when a burnt fragment id
+ * would show.
+ */
+const JIRA =
+  '<ac:structured-macro ac:name="jira" ac:schema-version="1">' +
+  '<ac:parameter ac:name="key">TAXAZ-1</ac:parameter></ac:structured-macro>';
+
 /** The bodyless link shape — no text at all, so Confluence draws the file name. */
 const SPREADSHEET = '<ac:link><ri:attachment ri:filename="Toplu FİN.xlsx"/></ac:link>';
 
@@ -173,10 +186,8 @@ describe('what still refuses the table', () => {
     expect(convert(preservedTable(unsafe))).toContain('confluence-block');
   });
 
-  it('a page link, which is O19 and not this decision', () => {
-    const page = '<ac:link><ri:page ri:content-title="Elsewhere"/></ac:link>';
-    expect(convert(preservedTable(page))).toContain('confluence-block');
-  });
+  // A page link *was* here, as the case O19 had not yet taken on. §6.4.18 has since
+  // taken it, and `table-links.test.ts` owns it now.
 
   it('a user mention, which has no vault equivalent at all', () => {
     const user = '<ac:link><ri:user ri:userkey="ff8081"/></ac:link>';
@@ -197,7 +208,7 @@ describe('what still refuses the table', () => {
     const mixed =
       '<table><tbody>' +
       '<tr><th>a</th><th>b</th></tr>' +
-      `<tr><td rowspan="2">${BUTTON}</td><td><ac:link><ri:page ri:content-title="X"/></ac:link></td></tr>` +
+      `<tr><td rowspan="2">${BUTTON}</td><td>${JIRA}</td></tr>` +
       '<tr><td>x</td></tr>' +
       '</tbody></table>';
 
@@ -214,7 +225,7 @@ describe('what still refuses the table', () => {
     const mixed =
       '<table><tbody>' +
       '<tr><th>a</th><th>b</th></tr>' +
-      `<tr><td rowspan="2">${BUTTON}</td><td><ac:link><ri:page ri:content-title="X"/></ac:link></td></tr>` +
+      `<tr><td rowspan="2">${BUTTON}</td><td>${JIRA}</td></tr>` +
       '<tr><td>x</td></tr>' +
       '</tbody></table>';
 
