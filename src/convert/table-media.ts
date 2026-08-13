@@ -1,5 +1,6 @@
 import { preserveBeside } from './placeholder-factory';
 import { childrenOf, firstElement, riAttr, tagOf } from './storage-parser';
+import { PROJECTED_TASK_LIST } from './table-tasks';
 import type { ConversionContext, ReverseContext } from './types';
 
 /**
@@ -238,8 +239,14 @@ function planReplacements(clone: Element, ctx: ConversionContext): Replacement[]
  * The anchor's body is `[^<]*` rather than `.*?` because it is always a file name,
  * which the serialiser escaped on the way in; a dot-matching form could span two
  * links and take the cell between them with it.
+ *
+ * The task list §6.4.14 projects joins the same alternation rather than taking a
+ * carrier of its own: `cf-tbl` names *a position* — "put fragment ID back where I
+ * am" — and has never cared what kind of element stands there.
  */
-const PROJECTED = /(?:<img\b[^>]*\/?>|<a\b[^>]*>[^<]*<\/a>)?<!--cf-tbl:(cfb-\d+)-->/;
+const PROJECTED = new RegExp(
+  `(?:<img\\b[^>]*\\/?>|<a\\b[^>]*>[^<]*<\\/a>|${PROJECTED_TASK_LIST})?<!--cf-tbl:(cfb-\\d+)-->`,
+);
 
 /**
  * Puts the images and links back, on the way to Confluence — the exact inverse of

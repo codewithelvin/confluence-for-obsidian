@@ -214,15 +214,35 @@ export function readCarriedIncludeId(html: string): string | null {
 }
 
 /**
+ * Marks the embed in front of it as standing for a document-preview macro (§6.4.13).
+ *
+ * The same *position* again — replace the paragraph, `<p>` and all — and a third
+ * name for the reason `cf-inc` was a second: what sits above this one is an embed
+ * of an **attached document**, and a reader opening the source to find
+ * `<!--cf-drawio:…-->` or `<!--cf-inc:…-->` beneath it would be told something
+ * untrue. Position is what the reverse pass needs; the name is what the reader needs.
+ */
+export function carriedFile(id: string): string {
+  return `<!--cf-file:${id}-->`;
+}
+
+const CARRIED_FILE_PATTERN = /^<!--cf-file:(cfb-\d+)-->$/;
+
+/** The fragment id behind a carried-document marker, or `null` for ordinary HTML. */
+export function readCarriedFileId(html: string): string | null {
+  return CARRIED_FILE_PATTERN.exec(html.trim())?.[1] ?? null;
+}
+
+/**
  * The fragment id behind any marker that stands for a whole block.
  *
- * One reader for both, because they mean the same thing to the trip back: the
+ * One reader for all three, because they mean the same thing to the trip back: the
  * paragraph *is* the macro and is replaced by it. Every call site must ask this
- * rather than either pattern alone, or an include would inflate on one path and
+ * rather than any one pattern alone, or an include would inflate on one path and
  * ride into the storage as a literal comment on another.
  */
 export function readBlockCarrierId(html: string): string | null {
-  return readCarriedBlockId(html) ?? readCarriedIncludeId(html);
+  return readCarriedBlockId(html) ?? readCarriedIncludeId(html) ?? readCarriedFileId(html);
 }
 
 /**

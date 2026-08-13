@@ -2,6 +2,7 @@ import type { PhrasingContent, RootContent, Table, TableCell, TableRow } from 'm
 import { hideEmoticonsIn } from './emoticons';
 import { makeBlockPlaceholder } from './placeholder-factory';
 import { hideTableMediaIn } from './table-media';
+import { hideTaskListsIn } from './table-tasks';
 import { acAttr, childrenOf, hasNamespacedMarkup, tagOf } from './storage-parser';
 import { FAITHFUL, serialiseElement, WHITESPACE_PRESERVING } from './storage-serialiser';
 import type { ConversionContext } from './types';
@@ -369,6 +370,10 @@ function projectTable(table: Element, ctx: ConversionContext): Projection {
   // Obsidian *can* show, and 20 tables in the mirror were opaque for no other
   // reason (§6.4.9, D18).
   if (!hideEmoticonsIn(projected)) return { reason: NAMESPACED };
+  // Before the media, not after: a picture inside a task body would otherwise be
+  // projected first, and the list would then wrap a carrier inside a carrier
+  // (§6.4.14, D23).
+  if (!hideTaskListsIn(projected, ctx)) return { reason: NAMESPACED };
   // Same argument one layer down, and a far larger one: 260 tables on 148 pages
   // hold an `ac:image` and nothing else worse (§6.4.10, D19).
   if (!hideTableMediaIn(projected, ctx)) return { reason: NAMESPACED };

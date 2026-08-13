@@ -3,6 +3,7 @@ import { serialiseMacroParams } from './macro-params';
 import { makeBlockPlaceholder } from './placeholder-factory';
 import { BLOCK_FENCE_LANGUAGE, collapse } from './placeholder-registry';
 import { convertDiagramBlock, DIAGRAM_MACROS, macroLabel } from './storage-drawio';
+import { convertFileBlock, FILE_MACROS } from './storage-file';
 import { convertIncludeBlock, INCLUDE_MACROS } from './storage-include';
 import { acAttr, childrenOf, tagOf } from './storage-parser';
 import type { ConversionContext } from './types';
@@ -155,6 +156,7 @@ export function convertMacro(macro: Element, ctx: ConversionContext): RootConten
   if (name === 'expand') return convertExpandMacro(macro, ctx);
   if (DIAGRAM_MACROS.has(name)) return convertDiagramBlock(macro, name, ctx);
   if (INCLUDE_MACROS.has(name)) return convertIncludeBlock(macro, name, ctx);
+  if (FILE_MACROS.has(name)) return convertFileBlock(macro, name, ctx);
 
   return makeBlockPlaceholder(ctx.placeholders, macro, {
     type: 'macro',
