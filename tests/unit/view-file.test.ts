@@ -153,10 +153,31 @@ describe('a document-preview macro at body level', () => {
     expect(markdown).not.toContain('![[');
   });
 
-  it('names the file in the widget, so the reader knows which document is missing', () => {
-    expect(convert(viewdoc('Missing report.xlsx', 'viewxls'))).toContain(
-      'label: viewxls macro — Missing report.xlsx',
+  it('says the file is not in the vault, so the widget does not read as a bug', () => {
+    // Page 98076055's `Surəti Düzəliş.xlsx` is not attached to it at all — the
+    // reference is broken *in Confluence*, and no work here could show it. The old
+    // label said only `view-file macro — <name>`, which reads like something this
+    // plugin failed to do; the client reported exactly that confusion.
+    expect(convert(viewdoc('Surəti Düzəliş.xlsx', 'viewxls'))).toContain(
+      'label: viewxls macro — Surəti Düzəliş.xlsx (not in the vault)',
     );
+  });
+
+  it('does not say why it is absent, because a pure converter cannot know', () => {
+    // Over the size limit, never fetched, or gone from Confluence are three different
+    // states with three different remedies. FR-8.9 distinguishes them in the sync
+    // report, which is the only place that can.
+    const markdown = convert(viewdoc('Missing report.xlsx', 'viewxls'));
+    expect(markdown).not.toContain('Confluence does not have');
+    expect(markdown).toContain('(not in the vault)');
+  });
+
+  it('says nothing about the vault for a macro that names no file', () => {
+    const nameless = '<ac:structured-macro ac:name="view-file" ac:schema-version="1"/>';
+    const markdown = convert(nameless);
+
+    expect(markdown).toContain('label: view-file macro');
+    expect(markdown).not.toContain('not in the vault');
   });
 });
 

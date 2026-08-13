@@ -206,7 +206,10 @@ describe('a placeholder label (FR-4.14)', () => {
       '</ac:parameter><ac:parameter ac:name="name"><ri:attachment ri:filename="Əlavə 2.docx"/>' +
       '</ac:parameter></ac:structured-macro>';
 
-    expect(labelOf(viewFile)).toBe('label: view-file macro — Əlavə 2.docx');
+    // The state is named too (§6.4.13): with no attachment resolver there is nothing
+    // on disk, and a widget that only named the file read as a failure of this plugin
+    // rather than of the page it came from.
+    expect(labelOf(viewFile)).toBe('label: view-file macro — Əlavə 2.docx (not in the vault)');
   });
 
   it('says only what the macro is when nothing identifies which one', () => {

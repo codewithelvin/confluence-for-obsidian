@@ -80,6 +80,24 @@ function fileLabel(name: string, filename: string | null): string {
 }
 
 /**
+ * What the widget says when the document is named but not in the vault.
+ *
+ * The distinction matters to a reader and the old label hid it. `view-file macro —
+ * Surəti Düzəliş.xlsx` reads like something this plugin failed to do; in fact that
+ * file is not attached to page 98076055 at all and the reference is broken **in
+ * Confluence too**, so no amount of work here could show it. Naming the state is the
+ * difference between a widget that looks like a bug and one that tells the reader
+ * where to go: re-attach the file at the source and it appears on the next pull.
+ *
+ * Deliberately *not* "not in Confluence". The converter is pure and cannot know why a
+ * file is absent — FR-8.9 answers that in the sync report, where the reasons are
+ * distinguishable. It knows only that it has nothing to embed, so that is all it says.
+ */
+function missingFileLabel(name: string, filename: string): string {
+  return `${name} macro — ${filename} (not in the vault)`;
+}
+
+/**
  * The document as a block: a paragraph holding the embed and the marker that
  * stands for the macro.
  *
@@ -93,7 +111,9 @@ function fileLabel(name: string, filename: string | null): string {
  *
  * A placeholder wherever the file is not on disk — FR-4.17, the same condition
  * every other embed carries. An `ri:attachment` reference outlives the attachment
- * it names, and a box pointing at nothing is worse than an honest widget.
+ * it names, and a box pointing at nothing is worse than an honest widget. The widget
+ * **says** the file is not in the vault, so it does not read as a failure of this
+ * plugin when the page is in fact broken at the source.
  */
 export function convertFileBlock(
   macro: Element,
@@ -101,10 +121,14 @@ export function convertFileBlock(
   ctx: ConversionContext,
 ): RootContent {
   const filename = fileTarget(macro);
-  const detail = { type: 'macro', name, label: fileLabel(name, filename) };
-
   const path = filename === null ? null : (ctx.resolveAttachment?.(filename) ?? null);
-  if (path === null || path.length === 0 || !isLinkable(path)) {
+  const onDisk = path !== null && path.length > 0;
+
+  const label =
+    filename !== null && !onDisk ? missingFileLabel(name, filename) : fileLabel(name, filename);
+  const detail = { type: 'macro', name, label };
+
+  if (path === null || !onDisk || !isLinkable(path)) {
     return makeBlockPlaceholder(ctx.placeholders, macro, detail);
   }
 
