@@ -77,9 +77,30 @@ describe('a task list inside a preserved table', () => {
     expect(markdown).not.toContain('```confluence-block');
   });
 
-  it('ticks a completed task', () => {
+  it('ticks a completed task and strikes its text through', () => {
+    // Confluence draws a complete task as a checked box *and* a line through the body.
+    // A box on its own is half the signal: `☑` beside upright text reads as an open
+    // task someone drew a tick next to.
     const markdown = convert(uatTable(taskList(task('3', 'Düzəldilib.', 'complete'))));
-    expect(markdown).toContain('<li>☑ Düzəldilib.</li>');
+    expect(markdown).toContain('<li>☑ <s>Düzəldilib.</s></li>');
+  });
+
+  it('strikes only the words, never the box', () => {
+    const markdown = convert(uatTable(taskList(task('3', 'Hazır', 'complete'))));
+    expect(markdown).not.toContain('<s>☑');
+  });
+
+  it('keeps formatting inside a struck-through body', () => {
+    const markdown = convert(
+      uatTable(taskList(task('4', 'adı <strong>dəyişdirildi</strong>', 'complete'))),
+    );
+    expect(markdown).toContain('<li>☑ <s>adı <strong>dəyişdirildi</strong></s></li>');
+  });
+
+  it('leaves an incomplete task upright', () => {
+    const markdown = convert(uatTable(taskList(task('5', 'Gözləyir'))));
+    expect(markdown).toContain('<li>☐ Gözləyir</li>');
+    expect(markdown).not.toContain('<s>');
   });
 
   it('leaves the box empty for a task with no status element at all', () => {
@@ -116,6 +137,9 @@ describe('a task list inside a preserved table', () => {
     expect(restored).toBe(storage);
     expect(restored).toContain('<ac:task-id>9</ac:task-id>');
     expect(restored).toContain('<ac:task-status>complete</ac:task-status>');
+    // The strikethrough is presentation of the projection and must not reach
+    // Confluence — the list collapses back into its fragment, `<s>` and all.
+    expect(restored).not.toContain('<s>');
   });
 
   it('stores the original list, not the hollow one left after projection', () => {

@@ -26,6 +26,12 @@ import type { ConversionContext } from './types';
  * text, and §6.4.9 already leans on exactly that certainty when it maps an emoticon
  * to its character. The boxes are not interactive — nor should they be, because
  * ticking one here could not travel back to the task in Confluence.
+ *
+ * **A ticked box also strikes its text through**, which is the half of the construct
+ * a box on its own misses. Confluence draws a complete task as a checked box *and*
+ * line-through body, so the two are one signal rather than two: `☑` beside upright
+ * text reads as an open task that someone drew a tick next to. Reported by the client
+ * on 2026-08-13 against the first re-pulled page.
  */
 
 /** Ballot boxes, empty and checked. Text, so nothing has to render an element. */
@@ -116,6 +122,11 @@ function bodyOf(task: Element): Element | null {
  * the projection would be stored hollow — and the push would then hand Confluence
  * a table of tasks with no text in them.
  *
+ * A complete task's body goes inside an `<s>`, because that is the other half of how
+ * Confluence draws one. The strikethrough is *presentation of the projection* and
+ * never reaches Confluence: the whole list collapses back into its fragment on push,
+ * so the `<s>` costs the round trip nothing.
+ *
  * The task id is not shown. Outside a table §6.4.2 carries it in a comment beside
  * the checkbox, because there the checkbox is Markdown the user may reorder; here
  * the whole list is replaced by its fragment on the way back, so the id travels in
@@ -137,11 +148,15 @@ function taskListElement(list: Element): Element | null {
     const body = bodyOf(task);
     if (body === null) return null;
 
+    const complete = isComplete(task);
     const item = document.createElement('li');
-    item.appendChild(
-      document.createTextNode(`${isComplete(task) ? CHECKED : UNCHECKED}${GLYPH_GAP}`),
-    );
-    for (const node of childrenOf(body)) item.appendChild(node.cloneNode(true));
+    item.appendChild(document.createTextNode(`${complete ? CHECKED : UNCHECKED}${GLYPH_GAP}`));
+
+    // The body hangs off the `<s>` when there is one, so the line runs through the
+    // words and not through the box — Confluence strikes the text alone.
+    const host = complete ? document.createElement('s') : item;
+    for (const node of childrenOf(body)) host.appendChild(node.cloneNode(true));
+    if (host !== item) item.appendChild(host);
 
     projected.appendChild(item);
   }
