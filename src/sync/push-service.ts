@@ -359,6 +359,7 @@ export class PushService {
       strictMarkup: connection.strictMarkup,
       resolveTarget: links.resolveTarget,
       resolveVaultPath: links.resolveVaultPath,
+      resolvePageId: links.resolvePageId,
       now: this.deps.now,
     };
   }

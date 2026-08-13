@@ -186,6 +186,7 @@ export class SyncEngine {
       strictMarkup: request.strictMarkup,
       resolveTarget: linkIndex.resolveTarget,
       resolveVaultPath: linkIndex.resolveVaultPath,
+      resolvePageId: linkIndex.resolvePageId,
       ...pullHooks({
         client: request.client,
         vault: this.deps.vault,

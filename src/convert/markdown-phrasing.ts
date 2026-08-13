@@ -2,6 +2,7 @@ import type { Image, Link, PhrasingContent } from 'mdast';
 import { emoticonElement, emoticonGlyph, readEmoticonName } from './emoticons';
 import {
   CODE_SEPARATOR,
+  readCarriedAnchorId,
   readCarriedImageId,
   readInlinePlaceholderId,
 } from './placeholder-registry';
@@ -241,38 +242,59 @@ function imageToStorage(node: Image, ctx: ReverseContext): string {
  * border, a thumbnail, a lone height. It replaces the *last* embed in the text,
  * which is the one the marker follows.
  */
-function textToStorage(value: string, ctx: ReverseContext, carried: string | null = null): string {
+/**
+ * Storage that replaces the last bracket construct of one kind in a text run.
+ *
+ * The kind matters. A text run can end in an embed *or* in a wikilink, and the two
+ * carriers mean different things — `cf-img` restores an image where an embed stands,
+ * `cf-a` restores an `<a href>` where a link stands (§6.4.16). Replacing whichever
+ * came last regardless of kind would put an anchor where a picture belongs.
+ */
+interface CarriedSegment {
+  readonly kind: 'embed' | 'link';
+  readonly storage: string;
+}
+
+function textToStorage(
+  value: string,
+  ctx: ReverseContext,
+  carried: CarriedSegment | null = null,
+): string {
   const segments = splitWikilinks(value);
   const first = segments[0];
   if (segments.length === 1 && first?.kind === 'text') return escapeText(value);
 
-  const lastEmbed = segments.reduce(
-    (found, segment, index) => (segment.kind === 'embed' ? index : found),
-    -1,
-  );
+  const replaceAt =
+    carried === null
+      ? -1
+      : segments.reduce(
+          (found, segment, index) => (segment.kind === carried.kind ? index : found),
+          -1,
+        );
 
   return segments
     .map((segment, index) => {
       if (segment.kind === 'text') return escapeText(segment.value);
-      if (segment.kind !== 'embed') return wikilinkToStorage(segment.link, ctx);
-      if (carried !== null && index === lastEmbed) return carried;
-      return embedToStorage(segment.link, ctx);
+      if (index === replaceAt && carried !== null) return carried.storage;
+      if (segment.kind === 'embed') return embedToStorage(segment.link, ctx);
+      return wikilinkToStorage(segment.link, ctx);
     })
     .join('');
 }
 
 /**
- * Whether a text node ends in an embed the marker after it could be describing.
+ * The kind of bracket construct a text node ends in, or `null` for anything else.
  *
- * Only the last segment counts: the marker sits immediately behind its own embed,
- * so anything after that embed means the user has edited between the two and the
- * pairing can no longer be trusted.
+ * Only the last segment counts: a carrier sits immediately behind its own construct,
+ * so anything after it means the user has edited between the two and the pairing can
+ * no longer be trusted.
  */
-function endsInEmbed(node: PhrasingContent | undefined): boolean {
-  if (node?.type !== 'text') return false;
+function endsIn(node: PhrasingContent | undefined): 'embed' | 'link' | null {
+  if (node?.type !== 'text') return null;
 
   const segments = splitWikilinks(node.value);
-  return segments[segments.length - 1]?.kind === 'embed';
+  const last = segments[segments.length - 1]?.kind;
+  return last === 'embed' || last === 'link' ? last : null;
 }
 
 /**
@@ -295,15 +317,21 @@ function htmlToStorage(
     return endsInGlyph(previous, emoticon) ? '' : emoticonElement(emoticon);
   }
 
-  const carried = readCarriedImageId(value);
-  if (carried === null) return value;
-  if (endsInEmbed(previous)) return '';
+  const image = readCarriedImageId(value);
+  if (image !== null) {
+    // Normally the embed in front has already taken it. When it has not, the user
+    // deleted the picture and left the marker — the source goes back on its own
+    // rather than being dropped, so the image survives an edit that only looked like
+    // a deletion, and a real deletion still shows up in the push diff.
+    return endsIn(previous) === 'embed' ? '' : inflateById(image, ctx);
+  }
 
-  // The embed it belonged to is gone — the user deleted the picture and left the
-  // marker. Its source goes back on its own rather than being dropped, so the
-  // image survives an edit that only looked like a deletion, and a real deletion
-  // still shows up in the push diff.
-  return inflateById(carried, ctx);
+  const anchor = readCarriedAnchorId(value);
+  if (anchor !== null) {
+    return endsIn(previous) === 'link' ? '' : inflateById(anchor, ctx);
+  }
+
+  return value;
 }
 
 /** Whether the text before a carrier still ends in the glyph that carrier names. */
@@ -336,11 +364,20 @@ function carriedSource(
   marker: PhrasingContent | undefined,
   text: PhrasingContent,
   ctx: ReverseContext,
-): string | null {
-  if (marker?.type !== 'html' || !endsInEmbed(text)) return null;
+): CarriedSegment | null {
+  if (marker?.type !== 'html') return null;
+  const ends = endsIn(text);
 
-  const id = readCarriedImageId(marker.value);
-  return id === null ? null : inflateById(id, ctx);
+  const image = readCarriedImageId(marker.value);
+  if (image !== null && ends === 'embed') {
+    return { kind: 'embed', storage: inflateById(image, ctx) };
+  }
+
+  const anchor = readCarriedAnchorId(marker.value);
+  if (anchor !== null && ends === 'link') {
+    return { kind: 'link', storage: inflateById(anchor, ctx) };
+  }
+  return null;
 }
 
 /**
@@ -362,9 +399,9 @@ function isCodeSeparator(nodes: readonly PhrasingContent[], index: number): bool
 /**
  * A text node, and whichever carrier the node after it turns out to be.
  *
- * Two carriers end up here because both describe something *inside* this text
- * rather than a node of their own: an emoticon's glyph, and the embed a
- * carried-image marker follows.
+ * Three carriers end up here because each describes something *inside* this text
+ * rather than a node of their own: an emoticon's glyph, the embed a carried-image
+ * marker follows, and the wikilink a carried-anchor marker follows.
  */
 function textNodeToStorage(
   node: PhrasingContent & { type: 'text' },

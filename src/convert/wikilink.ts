@@ -24,6 +24,16 @@ export function isLinkable(path: string): boolean {
 }
 
 /**
+ * Whether text can be a wikilink's label.
+ *
+ * Looser than `isLinkable`: a label may hold `#` and `^`, which mean something only in
+ * the *path* half. `|` would begin a second label and a newline would end the link.
+ */
+export function isLabelSafe(label: string): boolean {
+  return !/[[\]|\n]/.test(label);
+}
+
+/**
  * Builds `[[path]]`, or `[[path|label]]` when the visible text differs from the
  * page's own title.
  */

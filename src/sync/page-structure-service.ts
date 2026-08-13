@@ -275,6 +275,7 @@ export class PageStructureService {
         strictMarkup: connection.strictMarkup,
         resolveTarget: this.linkIndex().resolveTarget,
         resolveVaultPath: this.linkIndex().resolveVaultPath,
+        resolvePageId: this.linkIndex().resolvePageId,
       },
       {},
     );

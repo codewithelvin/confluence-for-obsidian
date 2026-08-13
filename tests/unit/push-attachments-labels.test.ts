@@ -77,6 +77,7 @@ beforeEach(() => {
     strictMarkup: false,
     resolveTarget: () => null,
     resolveVaultPath: () => null,
+    resolvePageId: () => null,
     now: () => NOW,
   };
 });

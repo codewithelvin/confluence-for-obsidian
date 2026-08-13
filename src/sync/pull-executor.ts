@@ -39,6 +39,8 @@ export interface ExecutorDeps {
   /** Wikilink resolution, in both directions (spec FR-4.7). */
   readonly resolveTarget: (target: PageTarget) => string | null;
   readonly resolveVaultPath: (path: string) => PageTarget | null;
+  /** The same table keyed by page id, for a pasted URL (spec FR-4.23). */
+  readonly resolvePageId: (pageId: string) => string | null;
   /**
    * Downloads the page's attachments and reports what is now on disk (FR-8.1).
    *

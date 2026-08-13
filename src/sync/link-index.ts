@@ -19,6 +19,14 @@ import type { SubscriptionState } from './sync-state';
 export interface MirroredPage extends PageTarget {
   /** Vault path of the note, **without** the `.md` extension. */
   readonly path: string;
+  /**
+   * Confluence's own id for the page (spec FR-4.23).
+   *
+   * Space and title are how an `ac:link` names a page; an id is how a *pasted URL*
+   * names one — `?pageId=20840530` is what the address bar shows. Both keys index the
+   * same table, so a link resolves the same way whichever form its author used.
+   */
+  readonly pageId: string;
 }
 
 /** Drops the extension, since a wikilink never carries one. */
@@ -52,6 +60,7 @@ export function mirroredPages(
         spaceKey: subscription.spaceKey,
         title: page.title,
         path: linkPath(page.localPath),
+        pageId: page.pageId,
       });
     }
   }
@@ -74,6 +83,7 @@ function key(target: PageTarget): string {
 export class LinkIndex {
   private readonly byTarget = new Map<string, string>();
   private readonly byPath = new Map<string, PageTarget>();
+  private readonly byId = new Map<string, string>();
 
   /**
    * Later entries win. The engine layers the sync in progress over what the state
@@ -85,6 +95,7 @@ export class LinkIndex {
       const target: PageTarget = { spaceKey: page.spaceKey, title: page.title };
       this.byTarget.set(key(target), page.path);
       this.byPath.set(page.path, target);
+      this.byId.set(page.pageId, page.path);
     }
   }
 
@@ -94,6 +105,17 @@ export class LinkIndex {
 
   readonly resolveVaultPath = (path: string): PageTarget | null => {
     return this.byPath.get(path) ?? null;
+  };
+
+  /**
+   * Which note holds a page id (spec FR-4.23).
+   *
+   * No inverse is needed, unlike `resolveTarget`: a wikilink written from a pasted URL
+   * is read back from the **fragment** beside it, which holds the anchor Confluence
+   * sent verbatim, so nothing has to reconstruct a URL from a path.
+   */
+  readonly resolvePageId = (pageId: string): string | null => {
+    return this.byId.get(pageId) ?? null;
   };
 }
 
@@ -111,7 +133,14 @@ export function syncLinkIndex(
   const here = remote.flatMap((page) => {
     const mapped = paths.byId.get(page.id);
     if (mapped === undefined) return [];
-    return [{ spaceKey: page.spaceKey, title: page.title, path: linkPath(mapped.notePath) }];
+    return [
+      {
+        spaceKey: page.spaceKey,
+        title: page.title,
+        path: linkPath(mapped.notePath),
+        pageId: page.id,
+      },
+    ];
   });
 
   return new LinkIndex([...mirrored, ...here]);

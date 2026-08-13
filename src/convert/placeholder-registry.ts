@@ -173,6 +173,30 @@ export function readCarriedImageId(html: string): string | null {
 }
 
 /**
+ * Marks the **wikilink** in front of it as standing for a pasted anchor (§6.4.16).
+ *
+ * A fourth inline marker rather than a reuse of `cf-img`, because what it follows is a
+ * *link* and not an embed, and the reverse pass has to know which of the two to look
+ * for: a text run can end in either, and reading one as the other would put an
+ * `<a href>` where an `<ac:image>` belongs.
+ *
+ * The element itself rides in the fragment rather than being rebuilt from the path.
+ * It has to: the mirror's 816 anchors carry their attributes in five different orders
+ * — `href`, `href rel`, `rel href`, `style href`, `href style` — and a reverse pass
+ * that picked one would fail certification on the other four.
+ */
+export function carriedAnchor(id: string): string {
+  return `<!--cf-a:${id}-->`;
+}
+
+const CARRIED_ANCHOR_PATTERN = /^<!--cf-a:(cfb-\d+)-->$/;
+
+/** The fragment id behind a carried-anchor marker, or `null` for ordinary HTML. */
+export function readCarriedAnchorId(html: string): string | null {
+  return CARRIED_ANCHOR_PATTERN.exec(html.trim())?.[1] ?? null;
+}
+
+/**
  * Marks the embed in front of it as standing for a whole *block* (spec §6.4.8).
  *
  * A second marker rather than a second meaning for `cf-img`, because the two

@@ -14,9 +14,9 @@ import { LinkIndex, linkPath } from '../../src/sync/link-index';
  */
 
 const index = new LinkIndex([
-  { spaceKey: 'ENG', title: 'Data Model', path: 'ENG/Architecture/Data Model' },
-  { spaceKey: 'ENG', title: 'Piped | Title', path: 'ENG/Piped - Title' },
-  { spaceKey: 'OPS', title: 'Runbook', path: 'OPS/Runbook' },
+  { spaceKey: 'ENG', title: 'Data Model', path: 'ENG/Architecture/Data Model', pageId: '10' },
+  { spaceKey: 'ENG', title: 'Piped | Title', path: 'ENG/Piped - Title', pageId: '11' },
+  { spaceKey: 'OPS', title: 'Runbook', path: 'OPS/Runbook', pageId: '12' },
 ]);
 
 const OPTIONS = {
@@ -161,8 +161,8 @@ describe('LinkIndex', () => {
 
   it('lets a later entry win, so a page moving in this sync resolves to its new path', () => {
     const moved = new LinkIndex([
-      { spaceKey: 'ENG', title: 'A', path: 'ENG/old/A' },
-      { spaceKey: 'ENG', title: 'A', path: 'ENG/new/A' },
+      { spaceKey: 'ENG', title: 'A', path: 'ENG/old/A', pageId: '9' },
+      { spaceKey: 'ENG', title: 'A', path: 'ENG/new/A', pageId: '9' },
     ]);
 
     expect(moved.resolveTarget({ spaceKey: 'ENG', title: 'A' })).toBe('ENG/new/A');

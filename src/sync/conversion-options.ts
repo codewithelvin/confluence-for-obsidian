@@ -19,6 +19,8 @@ export interface ConversionInputs {
   /** Wikilink resolution, in both directions (spec FR-4.7). */
   readonly resolveTarget: (target: PageTarget) => string | null;
   readonly resolveVaultPath: (path: string) => PageTarget | null;
+  /** The same table keyed by Confluence's page id, for a pasted URL (spec FR-4.23). */
+  readonly resolvePageId: (pageId: string) => string | null;
 }
 
 /**
@@ -42,6 +44,7 @@ export function conversionOptionsFor(
     strictMarkup: inputs.strictMarkup,
     resolveTarget: inputs.resolveTarget,
     resolveVaultPath: inputs.resolveVaultPath,
+    resolvePageId: inputs.resolvePageId,
     resolveAttachment: (filename) => attachments[filename]?.localPath ?? null,
     attachmentFor: (path) => byPath.get(path) ?? null,
   };

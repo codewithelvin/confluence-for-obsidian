@@ -4,6 +4,7 @@ import { CODE_SEPARATOR, collapse, readInlinePlaceholderId } from './placeholder
 import { acAttr, childrenOf, firstElement, riAttr, tagOf } from './storage-parser';
 import { emoticonCarrier, emoticonGlyph } from './emoticons';
 import { anchorLabel, convertAnchorLink, isAnchorLink, isAnchorUrl } from './storage-anchor';
+import { internalPageLink } from './storage-page-url';
 import { convertDiagramInline, DIAGRAM_MACROS, macroLabel } from './storage-drawio';
 import { convertIncludeInline, INCLUDE_MACROS } from './storage-include';
 import { convertImage } from './storage-images';
@@ -14,7 +15,7 @@ import {
   serialiseStartTag,
 } from './storage-serialiser';
 import type { ConversionContext, PageTarget } from './types';
-import { formatWikilink, isLinkable } from './wikilink';
+import { formatWikilink, isLabelSafe, isLinkable } from './wikilink';
 
 /**
  * Inline (phrasing) conversion, storage format to mdast (spec §6.4.2).
@@ -88,11 +89,6 @@ function plainLabel(element: Element, title: string): string | null | undefined 
     if (tag === 'ac:link-body') return undefined;
   }
   return null;
-}
-
-/** A label may not contain the characters that delimit a wikilink. */
-function isLabelSafe(label: string): boolean {
-  return !/[[\]|\n]/.test(label);
 }
 
 /**
@@ -227,13 +223,18 @@ function convertCode(element: Element, ctx: ConversionContext): PhrasingContent 
     label: `literal text resembling a placeholder: ${collapse(value, 40)}`,
   });
 }
-
 function convertAnchor(
   element: Element,
   ctx: ConversionContext,
 ): PhrasingContent | PhrasingContent[] {
   const href = element.getAttribute('href');
   if (href === null) return ctx.convertPhrasing(childrenOf(element));
+
+  // Asked before every other reading of the URL: a link to a page the vault holds is
+  // a wikilink whatever attributes it carries, which is what gives the mirror its
+  // graph and backlinks (FR-4.7, FR-4.23).
+  const internal = internalPageLink(element, href, ctx);
+  if (internal !== null) return internal;
 
   // An `<a href>` pointing at a Confluence page and an `ac:link` to the same
   // page both render as the same Markdown link, so the reverse pass could not

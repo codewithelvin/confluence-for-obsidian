@@ -41,6 +41,15 @@ export interface ConversionOptions {
    */
   readonly resolveVaultPath?: (path: string) => PageTarget | null;
   /**
+   * Vault path of a mirrored page by Confluence's own id, or `null` (spec FR-4.23).
+   *
+   * A third key into the same table, for the form a *pasted* URL uses:
+   * `?pageId=20840530` names a page by id where an `ac:link` names it by space and
+   * title. It needs no inverse — the anchor it replaces is restored from the fragment
+   * beside the wikilink, so nothing has to reconstruct a URL from a path.
+   */
+  readonly resolvePageId?: (pageId: string) => string | null;
+  /**
    * Vault path of an attachment already downloaded for this page, or `null`
    * (spec FR-8.1, FR-8.2).
    *

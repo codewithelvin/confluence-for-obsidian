@@ -52,6 +52,7 @@ export function singlePageExecutor(
     strictMarkup: connection.strictMarkup,
     resolveTarget: links.resolveTarget,
     resolveVaultPath: links.resolveVaultPath,
+    resolvePageId: links.resolvePageId,
     ...pullHooks({
       client,
       vault: deps.vault,
