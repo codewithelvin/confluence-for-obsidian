@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Setting } from 'obsidian';
-import type {
-  Plugin,
-  SettingDefinition,
-  SettingDefinitionGroup,
-  SettingDefinitionItem,
-  SettingGroup,
-} from 'obsidian';
+import type { Plugin } from 'obsidian';
 import { SCALAR_SETTING_GROUPS } from '../../src/settings/scalar-settings';
 import { ConfluenceSettingTab } from '../../src/settings/settings-tab';
 import { SettingsStore } from '../../src/settings/settings-store';
@@ -201,200 +194,32 @@ describe('ConfluenceSettingTab', () => {
       expect(store.get().attachmentSizeLimitMb).toBe(original);
     }
   });
-});
 
-function isGroup(item: SettingDefinitionItem): item is SettingDefinitionGroup {
-  return 'type' in item && item.type === 'group';
-}
-
-function isRender(item: SettingDefinitionItem): item is SettingDefinition {
-  return 'render' in item && typeof item.render === 'function';
-}
-
-/** Every control the declarative path declares, in order. */
-function declaredControls(tab: ConfluenceSettingTab): { key: string; type: string }[] {
-  return tab
-    .getSettingDefinitions()
-    .filter(isGroup)
-    .flatMap((group) => group.items ?? [])
-    .flatMap((item) =>
-      'control' in item && item.control !== undefined
-        ? [{ key: item.control.key, type: item.control.type }]
-        : [],
+  it('draws a row for every setting the shared table names', () => {
+    // The tab holds no name of its own, so this is what catches a setting
+    // added to the table and never rendered.
+    const { tab } = setup();
+    tab.display();
+    const drawn = Array.from(tab.containerEl.querySelectorAll('.setting-item')).map(
+      (row) => row.textContent ?? '',
     );
-}
 
-/**
- * Obsidian 1.13.0 and later render the tab from these instead of calling
- * `display()`, so anything missing here is invisible on a current install.
- * `display()` stays as the pre-1.13 fallback, which is what keeps
- * `minAppVersion` at 1.7.2.
- */
-describe('ConfluenceSettingTab declarative definitions', () => {
-  it('declares the dynamic sections and one group per scalar heading', () => {
-    const { tab } = setup();
-    const items = tab.getSettingDefinitions();
-
-    expect(items.filter(isRender).map((item) => item.name)).toEqual([
-      'Connections',
-      'Subscriptions',
-    ]);
-    expect(items.filter(isGroup).map((group) => group.heading)).toEqual([
-      'Attachments',
-      'Safety',
-      'Advanced',
-    ]);
-  });
-
-  it('declares every scalar setting exactly once, with the shared name and description', () => {
-    const { tab } = setup();
-    const declared = tab
-      .getSettingDefinitions()
-      .filter(isGroup)
-      .flatMap((group) => group.items ?? []);
-    const expected = SCALAR_SETTING_GROUPS.flatMap((group) => group.settings);
-
-    expect(declared).toHaveLength(expected.length);
-    for (const [index, setting] of expected.entries()) {
-      expect(declared[index]?.name).toBe(setting.name);
-      expect(declared[index]?.desc).toBe(setting.desc);
+    for (const group of SCALAR_SETTING_GROUPS) {
+      expect(drawn.some((text) => text.includes(group.heading))).toBe(true);
+      for (const setting of group.settings) {
+        expect(drawn.some((text) => text.includes(setting.name))).toBe(true);
+      }
     }
   });
 
-  it('declares the same controls the imperative fallback draws', () => {
-    // The drift guard. Two renderings of one tab is the standing risk in
-    // keeping display(); this fails the moment they disagree.
+  it('redraws through refresh() without duplicating the sections', () => {
     const { tab } = setup();
-    tab.display();
-    const declared = declaredControls(tab);
-
-    expect(declared.filter((control) => control.type === 'toggle')).toHaveLength(
-      checkboxes(tab).length,
-    );
-    expect(declared.filter((control) => control.type === 'number')).toHaveLength(
-      textInputs(tab).length,
-    );
-  });
-
-  it('reads a control value from the store, not a default', async () => {
-    const { store, tab } = setup();
-    await store.update({ attachmentSizeLimitMb: 77, debugLogging: true });
-
-    expect(tab.getControlValue('attachmentSizeLimitMb')).toBe(77);
-    expect(tab.getControlValue('debugLogging')).toBe(true);
-  });
-
-  it('returns undefined for a key that is not a setting', () => {
-    const { tab } = setup();
-    expect(tab.getControlValue('credentials')).toBeUndefined();
-    expect(tab.getControlValue('nonsense')).toBeUndefined();
-  });
-
-  it('persists a control value', async () => {
-    const { store, tab } = setup();
-
-    await tab.setControlValue('backupRetentionDays', 30);
-    await tab.setControlValue('allowForcePush', true);
-
-    expect(store.get().backupRetentionDays).toBe(30);
-    expect(store.get().allowForcePush).toBe(true);
-  });
-
-  it('refuses a value of the wrong type, an out-of-range number, or an unknown key', async () => {
-    const { store, tab } = setup();
-    const before = store.get();
-
-    await tab.setControlValue('backupRetentionDays', 'thirty');
-    await tab.setControlValue('allowForcePush', 'yes');
-    await tab.setControlValue('attachmentSizeLimitMb', 0);
-    await tab.setControlValue('attachmentSizeLimitMb', 2.5);
-    await tab.setControlValue('nonsense', 1);
-
-    expect(store.get().backupRetentionDays).toBe(before.backupRetentionDays);
-    expect(store.get().allowForcePush).toBe(before.allowForcePush);
-    expect(store.get().attachmentSizeLimitMb).toBe(before.attachmentSizeLimitMb);
-  });
-
-  it('rejects a number below its floor through the declared validator', () => {
-    const { tab } = setup();
-    const sizeLimit = tab
-      .getSettingDefinitions()
-      .filter(isGroup)
-      .flatMap((group) => group.items ?? [])
-      .find((item) => 'control' in item && item.control?.key === 'attachmentSizeLimitMb');
-
-    const control =
-      sizeLimit !== undefined && 'control' in sizeLimit ? sizeLimit.control : undefined;
-    // Narrowed to the number control: across the whole union `validate` takes
-    // the intersection of every value type, which is `never`.
-    expect(control?.type).toBe('number');
-    if (control?.type !== 'number') throw new Error('expected a number control');
-
-    expect(control.validate?.(0)).toBe('Enter 1 or more.');
-    expect(control.validate?.(2.5)).toBe('Enter a whole number.');
-    expect(control.validate?.(25)).toBeUndefined();
-  });
-
-  it('renders a dynamic section into the group list it is handed', () => {
-    const { tab } = setup();
-    const connections = tab.getSettingDefinitions().filter(isRender)[0];
-    expect(connections).toBeDefined();
-
-    const listEl = document.createElement('div');
-    const setting = new Setting(listEl);
-    connections!.render!(setting, { listEl } as unknown as SettingGroup);
-
-    expect(setting.settingEl.classList.contains('setting-item-heading')).toBe(true);
-    // A sibling of its heading row, which is the shape display() produces.
-    expect(listEl.textContent).toContain('No connections yet');
-    expect(setting.settingEl.textContent).not.toContain('No connections yet');
-  });
-
-  it('renders the section even when the heading row is not yet attached', () => {
-    // The regression the client hit: an earlier version anchored the body to
-    // `settingEl.parentElement`, which is null while the host is still building
-    // the row. The body was then created inside the heading row, where the
-    // heading's layout hid it, and both sections vanished from settings.
-    const { tab } = setup();
-    const subscriptions = tab.getSettingDefinitions().filter(isRender)[1];
-    expect(subscriptions).toBeDefined();
-
-    const detached = new Setting(document.createElement('div'));
-    detached.settingEl.remove();
-    expect(detached.settingEl.parentElement).toBeNull();
-
-    const listEl = document.createElement('div');
-    subscriptions!.render!(detached, { listEl } as unknown as SettingGroup);
-
-    expect(listEl.textContent).toContain('No subscriptions yet');
-  });
-
-  it('redraws through update() when the host has it, and through display() when it does not', () => {
-    // The two are not interchangeable: on 1.13+ the tab is rendered from the
-    // definitions, so a display() here would redraw it in the fallback layout
-    // and the declarative rendering would not return until the tab reopened.
-    const { tab } = setup();
-    expect(tab.containerEl.childElementCount).toBe(0);
+    tab.refresh();
+    const first = tab.containerEl.querySelectorAll('.setting-item-heading').length;
 
     tab.refresh();
-    expect(tab.containerEl.childElementCount).toBeGreaterThan(0);
 
-    const host = tab as unknown as { update?: () => void };
-    let updates = 0;
-    host.update = (): void => {
-      updates += 1;
-    };
-    tab.containerEl.empty();
-
-    tab.refresh();
-    expect(updates).toBe(1);
-    // update() owns the redraw; display() must not also run and empty it.
-    expect(tab.containerEl.childElementCount).toBe(0);
-  });
-
-  it('creates no Confluence client merely by describing the settings', () => {
-    // setup() throws if a client is constructed; describing must stay offline.
-    const { tab } = setup();
-    expect(() => tab.getSettingDefinitions()).not.toThrow();
+    expect(tab.containerEl.querySelectorAll('.setting-item-heading')).toHaveLength(first);
+    expect(checkboxes(tab)).toHaveLength(3);
   });
 });

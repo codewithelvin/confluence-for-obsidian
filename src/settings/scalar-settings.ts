@@ -1,18 +1,15 @@
-import type { PluginSettings } from './settings-types';
-
 /**
  * The settings that are a single editable scalar, described once.
  *
- * The tab renders twice over: imperatively through `display()` for Obsidian
- * before 1.13.0, and declaratively through `getSettingDefinitions()` for 1.13.0
- * and later, which is what puts them in the settings search. Two renderings of
- * one tab is the standing risk in that arrangement — they drift, and the older
- * one rots unnoticed. Naming each setting exactly once here is what stops it:
- * neither renderer holds a name, a description or a bound of its own.
+ * `display()` holds no name, description or bound of its own; it reads them
+ * from here. That is worth a module on its own because these six are the part
+ * of the tab Obsidian 1.13's declarative settings API can describe directly —
+ * each is one row with one value — so whenever §16 O23's port happens, it has a
+ * single place to read them from and cannot drift from what `display()` draws.
  *
- * Connections and subscriptions are absent on purpose. They are collections the
- * user adds to and removes from, not scalars, so both renderers reach the same
- * imperative section code instead.
+ * Connections and subscriptions are absent on purpose, and are the reason that
+ * port is still open: they are collections the user adds to and removes from,
+ * which the declarative form does not express as a row.
  */
 
 /** Keys of `PluginSettings` the user edits as a single value. */
@@ -99,11 +96,11 @@ export const SCALAR_SETTING_GROUPS: readonly ScalarSettingGroup[] = [
 ];
 
 /**
- * Rejects a number the imperative and declarative paths must both refuse.
+ * Rejects a number that must not be persisted.
  *
- * Returns the message to show, or `undefined` to accept. `display()` uses it to
- * decide whether to persist at all; the declarative control passes it straight
- * to `validate`, which surfaces the string under the field.
+ * Returns the message describing why, or `undefined` to accept. `display()`
+ * uses it to decide whether to write at all, leaving the field alone rather
+ * than correcting it under the user's caret.
  */
 export function validateScalarNumber(setting: ScalarSetting, value: number): string | undefined {
   if (!Number.isInteger(value)) return 'Enter a whole number.';
@@ -111,25 +108,4 @@ export function validateScalarNumber(setting: ScalarSetting, value: number): str
     return `Enter ${String(setting.min)} or more.`;
   }
   return undefined;
-}
-
-/**
- * Looks up the setting a declarative control key names.
- *
- * Obsidian hands `getControlValue`/`setControlValue` a bare `string`, so this
- * is what narrows it back to a key the settings actually have — and what makes
- * an unrecognised key a miss rather than a cast.
- */
-export function scalarSettingFor(key: string): ScalarSetting | undefined {
-  for (const group of SCALAR_SETTING_GROUPS) {
-    for (const setting of group.settings) {
-      if (setting.key === key) return setting;
-    }
-  }
-  return undefined;
-}
-
-/** Reads a scalar out of the settings without widening the key to `string`. */
-export function readScalar(settings: PluginSettings, key: ScalarSettingKey): number | boolean {
-  return settings[key];
 }
