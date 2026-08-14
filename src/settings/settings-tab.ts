@@ -142,6 +142,15 @@ export class ConfluenceSettingTab extends PluginSettingTab {
    * A section Obsidian cannot describe declaratively — a collection the user
    * adds to and removes from, not a scalar. The row the host built becomes the
    * heading and the existing imperative renderer fills the space beneath it.
+   *
+   * The body goes into the group's own list, which is the container the API
+   * hands over for exactly this, and which the heading row was appended to a
+   * moment earlier — so the section lands under its heading as a sibling of it,
+   * the same shape `display()` produces. An earlier version instead anchored
+   * the body to `settingEl.parentElement`: that is **null** while the host is
+   * still building the row, so the body was created inside the heading row,
+   * where the heading's own layout hid it, and both sections disappeared from
+   * the settings tab.
    */
   private sectionDefinition(
     name: string,
@@ -149,15 +158,9 @@ export class ConfluenceSettingTab extends PluginSettingTab {
   ): SettingDefinition {
     return {
       name,
-      render: (setting): void => {
+      render: (setting, group): void => {
         setting.setHeading();
-        // Built on the row's own parent and then moved directly after the row,
-        // so the body lands under its heading whatever order the host appends
-        // in — and so it never nests inside the heading row itself.
-        const host = setting.settingEl.parentElement ?? setting.settingEl;
-        const body = host.createDiv({ cls: 'confluence-settings-section' });
-        setting.settingEl.insertAdjacentElement('afterend', body);
-        renderBody(body);
+        renderBody(group?.listEl ?? setting.settingEl);
       },
     };
   }

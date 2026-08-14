@@ -335,20 +335,38 @@ describe('ConfluenceSettingTab declarative definitions', () => {
     expect(control.validate?.(25)).toBeUndefined();
   });
 
-  it('renders a dynamic section into its own body, directly after the heading row', () => {
+  it('renders a dynamic section into the group list it is handed', () => {
     const { tab } = setup();
     const connections = tab.getSettingDefinitions().filter(isRender)[0];
     expect(connections).toBeDefined();
 
-    const host = document.createElement('div');
-    const setting = new Setting(host);
-    connections!.render!(setting, {} as unknown as SettingGroup);
+    const listEl = document.createElement('div');
+    const setting = new Setting(listEl);
+    connections!.render!(setting, { listEl } as unknown as SettingGroup);
 
-    const body = host.querySelector('.confluence-settings-section');
-    expect(body).not.toBeNull();
-    // Directly after, so the section cannot drift away from its heading.
-    expect(setting.settingEl.nextElementSibling).toBe(body);
-    expect(body?.textContent).toContain('No connections yet');
+    expect(setting.settingEl.classList.contains('setting-item-heading')).toBe(true);
+    // A sibling of its heading row, which is the shape display() produces.
+    expect(listEl.textContent).toContain('No connections yet');
+    expect(setting.settingEl.textContent).not.toContain('No connections yet');
+  });
+
+  it('renders the section even when the heading row is not yet attached', () => {
+    // The regression the client hit: an earlier version anchored the body to
+    // `settingEl.parentElement`, which is null while the host is still building
+    // the row. The body was then created inside the heading row, where the
+    // heading's layout hid it, and both sections vanished from settings.
+    const { tab } = setup();
+    const subscriptions = tab.getSettingDefinitions().filter(isRender)[1];
+    expect(subscriptions).toBeDefined();
+
+    const detached = new Setting(document.createElement('div'));
+    detached.settingEl.remove();
+    expect(detached.settingEl.parentElement).toBeNull();
+
+    const listEl = document.createElement('div');
+    subscriptions!.render!(detached, { listEl } as unknown as SettingGroup);
+
+    expect(listEl.textContent).toContain('No subscriptions yet');
   });
 
   it('redraws through update() when the host has it, and through display() when it does not', () => {
