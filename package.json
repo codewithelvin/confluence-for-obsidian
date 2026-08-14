@@ -16,6 +16,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "lint:boundaries": "node scripts/check-boundaries.mjs",
+    "lint:review": "eslint --config review.eslint.config.mjs src",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",

@@ -40,7 +40,14 @@ export class SubscriptionsSection {
 
   render(containerEl: HTMLElement): void {
     new Setting(containerEl).setName('Subscriptions').setHeading();
+    this.renderBody(containerEl);
+  }
 
+  /**
+   * Everything below the heading. Split out because the declarative settings
+   * path supplies the heading itself, as the row it created for this section.
+   */
+  renderBody(containerEl: HTMLElement): void {
     const { subscriptions, connections } = this.deps.store.get();
     if (subscriptions.length === 0) {
       containerEl.createDiv({

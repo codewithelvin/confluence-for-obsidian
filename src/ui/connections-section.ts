@@ -30,7 +30,14 @@ export class ConnectionsSection {
 
   render(containerEl: HTMLElement): void {
     new Setting(containerEl).setName('Connections').setHeading();
+    this.renderBody(containerEl);
+  }
 
+  /**
+   * Everything below the heading. Split out because the declarative settings
+   * path supplies the heading itself, as the row it created for this section.
+   */
+  renderBody(containerEl: HTMLElement): void {
     const { connections } = this.deps.store.get();
     if (connections.length === 0) {
       containerEl.createDiv({

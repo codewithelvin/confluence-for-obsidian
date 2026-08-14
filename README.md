@@ -662,6 +662,24 @@ Honest list, so nothing surprises you later:
 
 ---
 
+## What the plugin can access
+
+Obsidian's plugin listing flags two capabilities. Both are real, and this is all they are:
+
+- **It can list every file in your vault.** The mirror has to find its own notes to work out
+  what changed, what moved and what a link points at, and Obsidian offers no way to ask about
+  one folder only. Nothing outside the mount folders is read for its content, changed, or sent
+  anywhere.
+- **It can write to your clipboard.** One button does this — **Copy full report**, in the
+  dialog _Check conversion fidelity of a space_ opens — and it writes that report there for you
+  to paste into a ticket. The plugin never _reads_ the clipboard, so anything you copied
+  elsewhere stays invisible to it.
+
+Everything the plugin sends goes to exactly one place: the Confluence site you configured. No
+telemetry, no analytics, no third-party service.
+
+---
+
 ## For developers
 
 ```bash
